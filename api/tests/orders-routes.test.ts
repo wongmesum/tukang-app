@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import app from "../src/index";
 import { generateTokenPair } from "../src/modules/auth/jwt";
 import { userRepo } from "../src/modules/users/repository";
+import { workerRepo } from "../src/modules/workers/repository";
 
 async function createUserAndHeader(role: "customer" | "worker" = "customer") {
   const user = await userRepo.create({
@@ -10,6 +11,20 @@ async function createUserAndHeader(role: "customer" | "worker" = "customer") {
     role,
   });
   const tokens = generateTokenPair({ userId: user.id, role: user.role });
+
+  if (role === "worker") {
+    await workerRepo.create({
+      userId: user.id,
+      ktpNumber: "1234567890123456",
+      ktpPhotoUrl: "http://example.com/ktp.jpg",
+      bio: "Test Worker",
+      workRadiusKm: 50,
+      homeLocation: { lat: -7.4722, lng: 112.4336 },
+      skills: ["AC"],
+    });
+    await workerRepo.update(user.id, { status: "active", isAvailable: true });
+  }
+
   return { user, auth: `Bearer ${tokens.token}` };
 }
 
@@ -195,5 +210,95 @@ describe("orders routes", () => {
       headers: { Authorization: stranger.auth },
     });
     expect(res.status).toBe(404);
+  });
+
+  it("POST /v1/worker/orders/:id/reject — worker rejects MATCHED order, order re-queues to PENDING", async () => {
+    const customer = await createUserAndHeader("customer");
+    const worker1 = await createUserAndHeader("worker");
+    const worker2 = await createUserAndHeader("worker");
+
+    const createRes = await app.request("/v1/orders", {
+      method: "POST",
+      headers: { Authorization: customer.auth, "Content-Type": "application/json" },
+      body: JSON.stringify(orderPayload()),
+    });
+    const created = await createRes.json();
+    const orderId = created.data.id;
+
+    // Simulate matching having assigned worker1 (MATCHED, not yet ACCEPTED)
+    const matchRes = await app.request("/v1/matching/assign", {
+      method: "POST",
+      headers: { Authorization: customer.auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ order_id: orderId, worker_id: worker1.user.id }),
+    });
+    expect(matchRes.status).toBe(200);
+
+    const rejectRes = await app.request(`/v1/worker/orders/${orderId}/reject`, {
+      method: "POST",
+      headers: { Authorization: worker1.auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "Terlalu jauh" }),
+    });
+    expect(rejectRes.status).toBe(200);
+    const rejected = await rejectRes.json();
+    expect(rejected.data.status).toBe("PENDING");
+    expect(rejected.data.worker_id).toBeNull();
+
+    // A different worker can now accept the re-queued order
+    const acceptRes = await app.request(`/v1/worker/orders/${orderId}/accept`, {
+      method: "POST",
+      headers: { Authorization: worker2.auth },
+    });
+    expect(acceptRes.status).toBe(200);
+    expect((await acceptRes.json()).data.worker_id).toBe(worker2.user.id);
+  });
+
+  it("POST /v1/worker/orders/:id/reject — rejects when order is not assigned to this worker", async () => {
+    const customer = await createUserAndHeader("customer");
+    const worker1 = await createUserAndHeader("worker");
+    const worker2 = await createUserAndHeader("worker");
+
+    const createRes = await app.request("/v1/orders", {
+      method: "POST",
+      headers: { Authorization: customer.auth, "Content-Type": "application/json" },
+      body: JSON.stringify(orderPayload()),
+    });
+    const orderId = (await createRes.json()).data.id;
+
+    await app.request("/v1/matching/assign", {
+      method: "POST",
+      headers: { Authorization: customer.auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ order_id: orderId, worker_id: worker1.user.id }),
+    });
+
+    const rejectRes = await app.request(`/v1/worker/orders/${orderId}/reject`, {
+      method: "POST",
+      headers: { Authorization: worker2.auth, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(rejectRes.status).toBe(404);
+  });
+
+  it("POST /v1/worker/orders/:id/reject — rejects transition from ACCEPTED (already accepted)", async () => {
+    const customer = await createUserAndHeader("customer");
+    const worker = await createUserAndHeader("worker");
+
+    const createRes = await app.request("/v1/orders", {
+      method: "POST",
+      headers: { Authorization: customer.auth, "Content-Type": "application/json" },
+      body: JSON.stringify(orderPayload()),
+    });
+    const orderId = (await createRes.json()).data.id;
+
+    await app.request(`/v1/worker/orders/${orderId}/accept`, {
+      method: "POST",
+      headers: { Authorization: worker.auth },
+    });
+
+    const rejectRes = await app.request(`/v1/worker/orders/${orderId}/reject`, {
+      method: "POST",
+      headers: { Authorization: worker.auth, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(rejectRes.status).toBe(409);
   });
 });

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { authMiddleware } from "../../shared/auth-middleware";
 import { requireRole } from "../../shared/role-middleware";
 import { orderRepo } from "./repository";
-import { cancelOrderSchema, createOrderSchema } from "./schema";
+import { cancelOrderSchema, createOrderSchema, rejectOrderSchema } from "./schema";
 import { transitionOrder } from "./state-machine";
 import type { OrderRecord } from "./types";
 
@@ -268,6 +268,61 @@ ordersRouter.post("/worker/orders/:id/accept", requireRole("worker"), async (con
       409,
     );
   }
+});
+
+// POST /worker/orders/:id/reject
+ordersRouter.post("/worker/orders/:id/reject", requireRole("worker"), async (context) => {
+  const authUser = context.get("user");
+  const id = context.req.param("id");
+  if (!id) {
+    return context.json(
+      { success: false, error: { code: "VALIDATION_ERROR", message: "ID order wajib diisi" } },
+      400,
+    );
+  }
+
+  const body = await context.req.json().catch(() => ({}));
+  const parsed = rejectOrderSchema.safeParse(body);
+  if (!parsed.success) {
+    return context.json(
+      { success: false, error: { code: "VALIDATION_ERROR", message: "Input tidak valid" } },
+      400,
+    );
+  }
+
+  const order = await orderRepo.findById(id);
+
+  // Only the worker this order is currently assigned to may reject it.
+  if (!order || order.workerId !== authUser.userId) {
+    return context.json(
+      { success: false, error: { code: "NOT_FOUND", message: "Order tidak ditemukan" } },
+      404,
+    );
+  }
+
+  // Reject only makes sense while the worker hasn't accepted yet (MATCHED).
+  // Once ACCEPTED or later, use cancel instead.
+  if (order.status !== "MATCHED") {
+    return context.json(
+      {
+        success: false,
+        error: {
+          code: "CONFLICT",
+          message: "Order tidak dapat ditolak pada status saat ini",
+        },
+      },
+      409,
+    );
+  }
+
+  // Re-queue: drop the assignment and send it back to PENDING so matching
+  // can offer it to another worker.
+  const updated = await orderRepo.update(id, {
+    status: "PENDING",
+    workerId: null,
+  });
+
+  return context.json({ success: true, data: formatOrder(updated) });
 });
 
 // POST /worker/orders/:id/enroute
