@@ -28,6 +28,11 @@ export const registerSchema = z.object({
   email: z.string().email("Format email tidak valid").optional(),
 });
 
+export const refreshTokenSchema = z.object({
+  refresh_token: z.string().min(1, "Refresh token wajib diisi"),
+});
+
 export type OtpRequestInput = z.infer<typeof otpRequestSchema>;
 export type OtpVerifyInput = z.infer<typeof otpVerifySchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;

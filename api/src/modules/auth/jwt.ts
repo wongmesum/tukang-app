@@ -10,24 +10,41 @@ export interface JwtPayload {
   role: string;
 }
 
+type TokenType = "access" | "refresh";
+
+type JwtClaims = JwtPayload & {
+  tokenType: TokenType;
+};
+
 export interface TokenPair {
   token: string;
   refreshToken: string;
 }
 
 export function generateTokenPair(payload: JwtPayload): TokenPair {
-  const token = jwt.sign(payload, JWT_SECRET, {
+  const token = jwt.sign({ ...payload, tokenType: "access" }, JWT_SECRET, {
     expiresIn: JWT_EXPIRES_IN,
   });
 
-  const refreshToken = jwt.sign(payload, JWT_SECRET, {
+  const refreshToken = jwt.sign({ ...payload, tokenType: "refresh" }, JWT_SECRET, {
     expiresIn: JWT_REFRESH_EXPIRES_IN,
   });
 
   return { token, refreshToken };
 }
 
-export function verifyToken(token: string): JwtPayload {
-  const decoded = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload & JwtPayload;
+function verifyTokenType(token: string, expectedType: TokenType): JwtPayload {
+  const decoded = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload & JwtClaims;
+  if (decoded.tokenType !== expectedType) {
+    throw new Error(`Expected ${expectedType} token`);
+  }
   return { userId: decoded.userId, role: decoded.role };
+}
+
+export function verifyToken(token: string): JwtPayload {
+  return verifyTokenType(token, "access");
+}
+
+export function verifyRefreshToken(token: string): JwtPayload {
+  return verifyTokenType(token, "refresh");
 }

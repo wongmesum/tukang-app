@@ -117,4 +117,72 @@ describe("auth routes", () => {
     expect(json.success).toBe(true);
     expect(json.data.user.name).toBe("Ahmad Tukang");
   });
+
+  it("POST /v1/auth/refresh — returns a new token pair for a valid refresh token", async () => {
+    const user = await userRepo.create({
+      phone: `08${Date.now().toString().slice(-10)}`,
+      name: "Refresh User",
+      role: "customer",
+    });
+    const tokens = generateTokenPair({ userId: user.id, role: user.role });
+
+    const res = await app.request("/v1/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: tokens.refreshToken }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.data.token).toEqual(expect.any(String));
+    expect(json.data.refresh_token).toEqual(expect.any(String));
+  });
+
+  it("POST /v1/auth/refresh — rejects an invalid refresh token", async () => {
+    const res = await app.request("/v1/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: "invalid-token" }),
+    });
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.success).toBe(false);
+    expect(json.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("POST /v1/auth/refresh — rejects an access token used as refresh token", async () => {
+    const user = await userRepo.create({
+      phone: `08${Date.now().toString().slice(-10)}`,
+      name: "Access Token User",
+      role: "customer",
+    });
+    const tokens = generateTokenPair({ userId: user.id, role: user.role });
+
+    const res = await app.request("/v1/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: tokens.token }),
+    });
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("GET /v1/me — rejects a refresh token used as access token", async () => {
+    const user = await userRepo.create({
+      phone: `08${Date.now().toString().slice(-10)}`,
+      name: "Refresh As Access User",
+      role: "customer",
+    });
+    const tokens = generateTokenPair({ userId: user.id, role: user.role });
+
+    const res = await app.request("/v1/me", {
+      headers: { Authorization: `Bearer ${tokens.refreshToken}` },
+    });
+
+    expect(res.status).toBe(401);
+  });
 });

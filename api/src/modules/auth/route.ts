@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { generateOtpCode, validateOtpRecord, OtpExpiredError, OtpInvalidError, OtpMaxAttemptsError } from "./otp";
-import { generateTokenPair, verifyToken } from "./jwt";
-import { otpRequestSchema, otpVerifySchema, registerSchema } from "./schema";
+import { generateTokenPair, verifyToken, verifyRefreshToken } from "./jwt";
+import { otpRequestSchema, otpVerifySchema, refreshTokenSchema, registerSchema } from "./schema";
 import { env } from "../../config/env";
 import { otpLimiter } from "../../shared/rate-limit";
 import { userRepo } from "../users/repository";
@@ -242,6 +242,74 @@ authRouter.post("/register", async (context) => {
       },
     },
   });
+});
+
+// POST /auth/refresh — issue new token pair from valid refresh token
+authRouter.post("/refresh", async (context) => {
+  const body = await context.req.json();
+  const parsed = refreshTokenSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return context.json(
+      {
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Input tidak valid",
+          details: parsed.error.flatten().fieldErrors,
+        },
+      },
+      400,
+    );
+  }
+
+  try {
+    const payload = verifyRefreshToken(parsed.data.refresh_token);
+
+    // Verify user still exists
+    const user = await userRepo.findById(payload.userId);
+    if (!user) {
+      return context.json(
+        {
+          success: false,
+          error: {
+            code: "UNAUTHORIZED",
+            message: "User tidak ditemukan",
+          },
+        },
+        401,
+      );
+    }
+
+    const tokens = generateTokenPair({ userId: user.id, role: user.role });
+
+    return context.json({
+      success: true,
+      data: {
+        token: tokens.token,
+        refresh_token: tokens.refreshToken,
+        user: {
+          id: user.id,
+          phone: user.phone,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          is_verified: user.isVerified,
+        },
+      },
+    });
+  } catch {
+    return context.json(
+      {
+        success: false,
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Refresh token tidak valid atau sudah kadaluarsa",
+        },
+      },
+      401,
+    );
+  }
 });
 
 export { authRouter };
