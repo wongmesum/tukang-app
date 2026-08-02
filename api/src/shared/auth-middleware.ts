@@ -1,5 +1,6 @@
 import type { Context, Next } from "hono";
 import { verifyToken } from "../modules/auth/jwt";
+import { isTokenRevoked } from "../modules/auth/token-revocation";
 
 export interface AuthUser {
   userId: string;
@@ -30,6 +31,19 @@ export async function authMiddleware(context: Context, next: Next): Promise<Resp
   }
 
   const token = header.slice(7);
+
+  if (isTokenRevoked(token)) {
+    return context.json(
+      {
+        success: false,
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Token sudah dicabut. Silakan login ulang.",
+        },
+      },
+      401,
+    );
+  }
 
   try {
     const payload = verifyToken(token);

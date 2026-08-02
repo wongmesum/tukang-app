@@ -4,8 +4,10 @@ import { generateTokenPair, verifyToken, verifyRefreshToken } from "./jwt";
 import { otpRequestSchema, otpVerifySchema, refreshTokenSchema, registerSchema } from "./schema";
 import { env } from "../../config/env";
 import { otpLimiter } from "../../shared/rate-limit";
+import { authMiddleware } from "../../shared/auth-middleware";
 import { userRepo } from "../users/repository";
 import { otpStore } from "./otp-store";
+import { isTokenRevoked, revokeToken } from "./token-revocation";
 
 const OTP_EXPIRY_SECONDS = env.OTP_EXPIRY_SECONDS;
 const OTP_MAX_ATTEMPTS = env.OTP_MAX_ATTEMPTS;
@@ -263,6 +265,19 @@ authRouter.post("/refresh", async (context) => {
     );
   }
 
+  if (isTokenRevoked(parsed.data.refresh_token)) {
+    return context.json(
+      {
+        success: false,
+        error: {
+          code: "UNAUTHORIZED",
+          message: "Refresh token sudah dicabut. Silakan login ulang.",
+        },
+      },
+      401,
+    );
+  }
+
   try {
     const payload = verifyRefreshToken(parsed.data.refresh_token);
 
@@ -310,6 +325,57 @@ authRouter.post("/refresh", async (context) => {
       401,
     );
   }
+});
+
+// POST /auth/logout — revoke access token and refresh token
+authRouter.post("/logout", authMiddleware, async (context) => {
+  const authHeader = context.req.header("Authorization");
+  const accessToken = authHeader!.slice(7);
+
+  const body = await context.req.json().catch(() => ({}));
+  const parsed = refreshTokenSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return context.json(
+      {
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Input tidak valid",
+          details: parsed.error.flatten().fieldErrors,
+        },
+      },
+      400,
+    );
+  }
+
+  const authUser = context.get("user");
+  const refreshToken = parsed.data.refresh_token;
+
+  try {
+    const payload = verifyRefreshToken(refreshToken);
+    if (payload.userId !== authUser.userId) {
+      return context.json(
+        {
+          success: false,
+          error: {
+            code: "FORBIDDEN",
+            message: "Akses ditolak",
+          },
+        },
+        403,
+      );
+    }
+  } catch {
+    // If the refresh token is already expired or invalid,
+    // we still continue to revoke the access token.
+  }
+
+  // Mark both as revoked
+  revokeToken(accessToken);
+  revokeToken(refreshToken);
+
+  return context.json({ success: true, data: { message: "Berhasil logout" } });
 });
 
 export { authRouter };

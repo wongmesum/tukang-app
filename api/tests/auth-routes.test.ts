@@ -185,4 +185,64 @@ describe("auth routes", () => {
 
     expect(res.status).toBe(401);
   });
+
+  it("POST /v1/auth/logout — revokes the current access and refresh tokens", async () => {
+    const user = await userRepo.create({
+      phone: `08${Date.now().toString().slice(-10)}`,
+      name: "Logout User",
+      role: "customer",
+    });
+    const tokens = generateTokenPair({ userId: user.id, role: user.role });
+
+    const logoutRes = await app.request("/v1/auth/logout", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokens.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refresh_token: tokens.refreshToken }),
+    });
+
+    expect(logoutRes.status).toBe(200);
+    expect((await logoutRes.json()).success).toBe(true);
+
+    const profileRes = await app.request("/v1/me", {
+      headers: { Authorization: `Bearer ${tokens.token}` },
+    });
+    expect(profileRes.status).toBe(401);
+
+    const refreshRes = await app.request("/v1/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: tokens.refreshToken }),
+    });
+    expect(refreshRes.status).toBe(401);
+  });
+
+  it("POST /v1/auth/logout — rejects a refresh token owned by another user", async () => {
+    const firstUser = await userRepo.create({
+      phone: `081${Date.now().toString().slice(-9)}`,
+      name: "First Logout User",
+      role: "customer",
+    });
+    const secondUser = await userRepo.create({
+      phone: `082${Date.now().toString().slice(-9)}`,
+      name: "Second Logout User",
+      role: "customer",
+    });
+    const firstTokens = generateTokenPair({ userId: firstUser.id, role: firstUser.role });
+    const secondTokens = generateTokenPair({ userId: secondUser.id, role: secondUser.role });
+
+    const res = await app.request("/v1/auth/logout", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${firstTokens.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refresh_token: secondTokens.refreshToken }),
+    });
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+  });
 });
