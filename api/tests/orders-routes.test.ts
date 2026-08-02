@@ -48,6 +48,26 @@ function orderPayload() {
   };
 }
 
+async function createAndCompleteOrder(customerAuth: string, workerAuth: string): Promise<string> {
+  const createRes = await app.request("/v1/orders", {
+    method: "POST",
+    headers: { Authorization: customerAuth, "Content-Type": "application/json" },
+    body: JSON.stringify(orderPayload()),
+  });
+  const orderId = (await createRes.json()).data.id as string;
+
+  const actions = ["accept", "enroute", "arrive", "start", "complete"] as const;
+  for (const action of actions) {
+    const response = await app.request(`/v1/worker/orders/${orderId}/${action}`, {
+      method: "POST",
+      headers: { Authorization: workerAuth },
+    });
+    expect(response.status).toBe(200);
+  }
+
+  return orderId;
+}
+
 describe("orders routes", () => {
   it("POST /v1/orders — rejects without token", async () => {
     const res = await app.request("/v1/orders", {
@@ -300,5 +320,57 @@ describe("orders routes", () => {
       body: JSON.stringify({}),
     });
     expect(rejectRes.status).toBe(409);
+  });
+
+  it("GET /v1/worker/orders/history — rejects without token", async () => {
+    const res = await app.request("/v1/worker/orders/history");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /v1/worker/orders/history — rejects non-worker roles", async () => {
+    const customer = await createUserAndHeader("customer");
+    const res = await app.request("/v1/worker/orders/history", {
+      headers: { Authorization: customer.auth },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /v1/worker/orders/history — returns only completed orders for the worker", async () => {
+    const customer = await createUserAndHeader("customer");
+    const worker = await createUserAndHeader("worker");
+    const otherWorker = await createUserAndHeader("worker");
+
+    // One completed order for our worker
+    const completedId = await createAndCompleteOrder(customer.auth, worker.auth);
+
+    // One active order that should NOT appear in history
+    const activeCreateRes = await app.request("/v1/orders", {
+      method: "POST",
+      headers: { Authorization: customer.auth, "Content-Type": "application/json" },
+      body: JSON.stringify(orderPayload()),
+    });
+    const activeOrderId = (await activeCreateRes.json()).data.id as string;
+    await app.request(`/v1/worker/orders/${activeOrderId}/accept`, {
+      method: "POST",
+      headers: { Authorization: worker.auth },
+    });
+
+    // A completed order belonging to another worker — must not leak
+    await createAndCompleteOrder(customer.auth, otherWorker.auth);
+
+    const res = await app.request("/v1/worker/orders/history", {
+      headers: { Authorization: worker.auth },
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(Array.isArray(json.data)).toBe(true);
+
+    const ids = json.data.map((o: { id: string }) => o.id);
+    expect(ids).toContain(completedId);
+    expect(ids).not.toContain(activeOrderId);
+    expect(json.data.every((o: { worker_id: string }) => o.worker_id === worker.user.id)).toBe(true);
+    expect(json.meta).toBeDefined();
+    expect(json.meta.total).toBeGreaterThanOrEqual(1);
   });
 });

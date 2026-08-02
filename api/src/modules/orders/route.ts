@@ -207,6 +207,15 @@ ordersRouter.get("/worker/orders/active", requireRole("worker"), async (context)
   return context.json({ success: true, data: paginated.items.map(formatOrder), meta: paginated.meta });
 });
 
+// GET /worker/orders/history
+ordersRouter.get("/worker/orders/history", requireRole("worker"), async (context) => {
+  const authUser = context.get("user");
+  const params = parsePagination(context);
+  const items = await orderRepo.findHistory(authUser.userId);
+  const paginated = paginate(items, params);
+  return context.json({ success: true, data: paginated.items.map(formatOrder), meta: paginated.meta });
+});
+
 // POST /worker/orders/:id/accept
 ordersRouter.post("/worker/orders/:id/accept", requireRole("worker"), async (context) => {
   const authUser = context.get("user");
