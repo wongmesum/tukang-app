@@ -1,0 +1,59 @@
+Baca file `C:\Users\Administrator\tukang-app\TUKANGNDESO-MASTER-BUILD.txt` dulu sampai selesai. File itu sumber kebenaran utama proyek ini.
+
+Konteks proyek:
+- Nama produk: TukangNDeso
+- Model bisnis: marketplace jasa tukang
+- Area launch awal: Mojokerto Kabupaten, Jawa Timur
+- Payment utama: QRIS
+- Cash: fallback saja
+- Harga awal:
+  - Rp 30.000/jam
+  - Rp 150.000/hari
+  - Ongkos jalan Rp 1.000/km
+  - surcharge sesuai spec
+- Kategori utama awal:
+  - AC
+  - bangunan ringan
+  - listrik
+  - plumbing
+
+Tujuan:
+Bangun aplikasi TukangNDeso sesuai isi spec gabungan itu. Jadikan file tersebut sebagai blueprint penuh untuk arsitektur, database, API, layar aplikasi, roadmap, dan operasional.
+
+Aturan kerja:
+1. Jangan abaikan isi file spec.
+2. Jika ada konflik, prioritaskan isi `TUKANGNDESO-MASTER-BUILD.txt`.
+3. Kerjakan bertahap, jangan lompat jauh.
+4. Mulai dari fondasi:
+   - struktur repo
+   - backend TypeScript strict
+   - database schema
+   - auth OTP
+   - pricing calculator
+   - API inti
+   - Flutter app
+5. Gunakan TDD untuk logic yang berisiko, terutama:
+   - pricing calculator
+   - order state machine
+   - payment QRIS webhook
+   - matching tukang
+6. Jangan commit, push, atau ubah hal di luar scope tanpa diminta.
+7. Kalau perlu keputusan bisnis baru, berhenti dan tanya singkat.
+8. Semua output user-facing pakai Bahasa Indonesia. Code dan komentar pakai English.
+9. Minimal change, clear structure, no `any`, TypeScript strict.
+10. Setelah tiap fase:
+   - ringkas apa yang selesai
+   - file yang berubah
+   - test yang dijalankan
+   - blocker jika ada
+
+Urutan eksekusi pertama:
+1. Ringkas spec jadi checklist implementasi.
+2. Buat struktur project yang direkomendasikan.
+3. Setup backend TypeScript + database schema dari spec.
+4. Tulis test pricing calculator dulu.
+5. Implement pricing calculator sampai test hijau.
+6. Lanjut ke endpoint auth dan order dasar.
+
+Kalau spec terlalu besar untuk sekali jalan, pecah jadi fase kecil dan mulai dari Fase 1.
+Mulai sekarang.

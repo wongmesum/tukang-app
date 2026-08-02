@@ -1,0 +1,1455 @@
+================================================================================
+  TUKANGNDESO — MASTER BUILD SPECIFICATION (SINGLE FILE)
+  Generated: 2026-07-30
+  Gabungan seluruh dokumen perencanaan. Siap dijadikan referensi build.
+================================================================================
+
+
+################################################################################
+# FILE: docs/00-README.md
+################################################################################
+
+# TukangNDeso — Dokumen Perencanaan
+
+Referensi konsep: [situkang.com/tukang-bangunan](https://situkang.com/tukang-bangunan)
+
+Aplikasi Android marketplace jasa layanan tukang (AC, bangunan, listrik, plumbing, dll) dengan skema tarif per jam / per hari, biaya perjalanan berdasarkan jarak, dan matching berbasis lokasi.
+
+## Struktur Dokumen
+
+| File | Isi |
+| ------ | ----- |
+| [01-product-overview.md](01-product-overview.md) | Ringkasan produk, kategori, model harga, target user |
+| [02-user-flows.md](02-user-flows.md) | Alur pelanggan, tukang, status order |
+| [03-database-schema.md](03-database-schema.md) | Skema PostgreSQL + PostGIS |
+| [04-api-endpoints.md](04-api-endpoints.md) | REST API + WebSocket + error codes |
+| [05-app-screens.md](05-app-screens.md) | Daftar layar customer & worker, komponen, design system |
+| [06-mvp-roadmap.md](06-mvp-roadmap.md) | Fase pengembangan mingguan + estimasi biaya |
+| [07-daily-execution-plan.md](07-daily-execution-plan.md) | Rencana kerja harian 49 hari (detail per hari) |
+| [08-mojokerto-operations.md](08-mojokerto-operations.md) | Area layanan, strategi launch, tarif lokal, QRIS, rekrutmen |
+
+## Ringkasan Cepat
+
+**Model Harga**
+
+- Per jam: **Rp 30.000/jam** (min 2 jam)
+- Per hari: **Rp 150.000/hari** (8 jam kerja)
+- Ongkos jalan: **Rp 1.000/km** (min Rp 5.000, maks Rp 50.000)
+- Surcharge: hari libur +50%, malam +30%, weekend +20%, urgent +Rp 25.000, lantai >3 +Rp 10.000/lantai
+
+**Contoh:** Tukang AC 3 jam, jarak 12 km, hari biasa = `(3×30.000) + (12×1.000)` = **Rp 102.000**
+
+**Tech Stack (usulan)**
+
+- App: Flutter + Riverpod + go_router + Dio
+- Backend: Node.js/Bun + TypeScript strict + Hono/Fastify
+- Database: PostgreSQL + PostGIS
+- Realtime: WebSocket
+- Storage: S3-compatible
+- Payment: QRIS (via Midtrans/Xendit/DANA)
+- Maps: Google Maps
+
+## Langkah Selanjutnya
+
+1. Anda review 6 dokumen di atas
+2. Beri tanda mana yang mau disesuaikan (harga, kategori, alur, dll)
+3. Setelah spec disetujui → pilih tech stack final → mulai koding Fase 1
+
+## Keputusan Bisnis (Disetujui)
+
+- [x] Model bisnis: **Marketplace** — pelanggan cari & booking tukang via app
+- [x] Area launch: **Mojokerto Kabupaten**, Jawa Timur
+- [x] Payment: **QRIS** (standar nasional, semua e-wallet & bank kompatibel)
+- [x] Nama & branding: **TukangNDeso**
+
+## Pertanyaan Terbuka (Masih Perlu Keputusan)
+
+- [ ] Fee platform: potong berapa % dari tukang? (saat ini tarif 100% ke tukang)
+- [ ] Domain final: `tukangndeso.id` / `tukangndeso.com` / lain?
+- [ ] QRIS provider: Midtrans / Xendit / DANA Bisnis / lain?
+
+
+################################################################################
+# FILE: docs/01-product-overview.md
+################################################################################
+
+# TukangNDeso — Product Overview
+
+## Ringkasan Produk
+
+Aplikasi marketplace jasa tukang yang menghubungkan pelanggan dengan tukang terdekat di wilayah **Mojokerto Kabupaten**, Jawa Timur. Pelanggan bisa memesan layanan per jam atau per hari, dengan biaya perjalanan otomatis berdasarkan jarak. Pembayaran via **QRIS** (kompatibel semua e-wallet & mobile banking).
+
+## Kategori Layanan
+
+| Kode | Kategori | Contoh Pekerjaan |
+| ------ | ---------- | ------------------ |
+| AC | AC & Pendingin | Pasang, cuci, isi freon, perbaikan, bongkar |
+| BGN | Bangunan | Renovasi, plester, keramik, pengecatan, atap |
+| LST | Listrik | Instalasi, perbaikan, tambah daya, panel |
+| PLB | Plumbing/Pipa | Saluran mampet, instalasi pipa, WC, pompa |
+| LAS | Las & Besi | Pagar, kanopi, teralis, railing |
+| TKY | Tukang Kayu | Kusen, lemari, plafon, partisi |
+| CLN | Cleaning | Bersih rumah, poles lantai, buang puing |
+| CAT | Cat & Finishing | Pengecatan interior/eksterior, waterproofing |
+| TNM | Taman | Landscaping, potong rumput, kolam |
+
+## Model Harga
+
+### Tarif Dasar
+
+| Skema | Tarif | Keterangan |
+|-------|-------|------------|
+| Per Jam | Rp 30.000/jam | Minimum 2 jam |
+| Per Hari (Harian) | Rp 150.000/hari | 8 jam kerja (08:00-16:00) |
+
+### Biaya Perjalanan
+
+- **Formula:** `jarak_km × Rp 1.000`
+- **Minimum:** Rp 5.000 (jarak < 5 km tetap Rp 5.000)
+- **Maksimum:** Rp 50.000 (jarak > 50 km ditolak, di luar area)
+
+### Biaya Tambahan (Surcharge)
+
+| Kondisi | Tambahan |
+| --------- | ---------- |
+| Hari libur nasional | +50% tarif dasar |
+| Malam (18:00-06:00) | +30% tarif dasar |
+| Weekend (Sabtu-Minggu) | +20% tarif dasar |
+| Urgent (< 2 jam dari booking) | +Rp 25.000 flat |
+| Lantai > 3 (tanpa lift) | +Rp 10.000/lantai |
+
+### Formula Total
+
+```
+total = tarif_dasar + biaya_perjalanan + surcharge
+```
+
+**Contoh:**
+
+- Tukang AC, 3 jam, jarak 12 km, hari biasa
+- = (3 × 30.000) + (12 × 1.000) + 0
+- = 90.000 + 12.000
+- = **Rp 102.000**
+
+## Target User
+
+### Pelanggan (Customer)
+
+- Pemilik rumah/ruko
+- Pengelola kos/apartemen
+- Kantor kecil-menengah
+
+### Tukang (Worker)
+
+- Tukang independen
+- Mandor dengan tim kecil
+- Teknisi AC/listrik freelance
+
+## Unique Value Proposition
+
+1. **Transparan** — harga terlihat sebelum booking, tidak ada negosiasi ribet
+2. **Terdekat** — matching berbasis lokasi, tukang datang lebih cepat
+3. **Fleksibel** — per jam untuk pekerjaan kecil, harian untuk proyek
+4. **Terjamin** — rating, review, dan garansi pengerjaan ulang
+
+
+################################################################################
+# FILE: docs/02-user-flows.md
+################################################################################
+
+# TukangNDeso — User Flows
+
+## Flow 1: Pelanggan Memesan Tukang
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Buka App → Home Screen                                       │
+│ 2. Pilih Kategori (AC / Bangunan / Listrik / dst)               │
+│ 3. Pilih Sub-layanan (misal: "Cuci AC Split")                   │
+│ 4. Isi Detail:                                                  │
+│    - Deskripsi masalah (opsional, + foto)                        │
+│    - Alamat (auto-detect GPS / input manual)                     │
+│    - Jadwal: Sekarang / Pilih tanggal-jam                        │
+│    - Skema: Per Jam / Per Hari                                   │
+│    - Estimasi durasi (jam/hari)                                  │
+│ 5. Lihat Estimasi Harga (breakdown tarif + jarak + surcharge)    │
+│ 6. Konfirmasi & Booking                                         │
+│ 7. Sistem cari tukang terdekat yang available                    │
+│ 8. Tukang menerima → status "Dalam Perjalanan"                  │
+│ 9. Tukang tiba → tekan "Mulai Kerja"                            │
+│ 10. Pekerjaan selesai → tekan "Selesai"                         │
+│ 11. Pelanggan konfirmasi → Pembayaran                           │
+│ 12. Rating & Review                                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Flow 2: Tukang Menerima Order
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Notifikasi masuk: order baru di area                         │
+│ 2. Lihat detail: kategori, lokasi, estimasi bayaran             │
+│ 3. Terima / Tolak (timeout 3 menit → pindah tukang lain)       │
+│ 4. Terima → navigasi ke lokasi pelanggan                        │
+│ 5. Tiba → konfirmasi "Saya Sudah Tiba"                         │
+│ 6. Mulai kerja → timer berjalan                                 │
+│ 7. Selesai → upload foto hasil (opsional)                       │
+│ 8. Pelanggan approve → saldo masuk                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Flow 3: Registrasi Tukang
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Download app → pilih "Daftar sebagai Tukang"                 │
+│ 2. Input: Nama, HP, KTP (foto), Alamat                          │
+│ 3. Pilih kategori keahlian (bisa multi)                         │
+│ 4. Upload portofolio (foto pekerjaan sebelumnya)                │
+│ 5. Set radius kerja (km dari rumah)                             │
+│ 6. Verifikasi admin (24-48 jam)                                 │
+│ 7. Approved → profil aktif, bisa terima order                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Flow 4: Registrasi Pelanggan
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Download app → "Daftar / Login"                              │
+│ 2. OTP via SMS/WhatsApp (nomor HP)                              │
+│ 3. Input: Nama, Alamat utama                                    │
+│ 4. Langsung bisa booking                                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Status Order (State Machine)
+
+```
+PENDING → MATCHED → ACCEPTED → EN_ROUTE → ARRIVED → IN_PROGRESS → COMPLETED → PAID → REVIEWED
+   │         │         │                                    │
+   └→EXPIRED └→TIMEOUT └→CANCELLED_BY_WORKER         └→DISPUTED
+         └→CANCELLED_BY_CUSTOMER
+```
+
+| Status | Trigger | Aksi |
+| -------- | --------- | ------ |
+| PENDING | Customer submit order | Cari tukang terdekat |
+| MATCHED | Sistem assign tukang | Tunggu accept/reject |
+| ACCEPTED | Tukang accept | Mulai navigasi |
+| EN_ROUTE | Tukang berangkat | Tracking real-time |
+| ARRIVED | Tukang tekan "Tiba" | Konfirmasi pelanggan |
+| IN_PROGRESS | Timer mulai | Tracking durasi |
+| COMPLETED | Tukang tekan "Selesai" | Tunggu approval |
+| PAID | Pelanggan bayar | Dana masuk saldo tukang |
+| REVIEWED | Rating diberikan | Order selesai |
+| DISPUTED | Ada masalah | Admin handle |
+
+
+################################################################################
+# FILE: docs/03-database-schema.md
+################################################################################
+
+# TukangNDeso — Database Schema
+
+## Tech: PostgreSQL + PostGIS (untuk geolocation)
+
+---
+
+## Tabel: `users`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| phone | VARCHAR(15) UNIQUE | Nomor HP (login) |
+| name | VARCHAR(100) | Nama lengkap |
+| email | VARCHAR(255) NULL | Opsional |
+| avatar_url | TEXT NULL | |
+| role | ENUM('customer','worker','admin') | |
+| is_verified | BOOLEAN DEFAULT false | |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | |
+
+## Tabel: `addresses`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| user_id | UUID (FK→users) | |
+| label | VARCHAR(50) | "Rumah", "Kantor", etc |
+| full_address | TEXT | Alamat lengkap |
+| location | GEOGRAPHY(Point, 4326) | PostGIS lat/lng |
+| district | VARCHAR(100) | Kecamatan |
+| city | VARCHAR(100) | Kota |
+| is_default | BOOLEAN | |
+
+## Tabel: `worker_profiles`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| user_id | UUID (FK→users) UNIQUE | |
+| ktp_number | VARCHAR(16) | |
+| ktp_photo_url | TEXT | |
+| bio | TEXT NULL | Deskripsi singkat |
+| work_radius_km | INTEGER DEFAULT 20 | Radius mau kerja |
+| home_location | GEOGRAPHY(Point, 4326) | Titik asal |
+| is_available | BOOLEAN DEFAULT true | Online/offline |
+| rating_avg | DECIMAL(2,1) DEFAULT 0 | |
+| total_orders | INTEGER DEFAULT 0 | |
+| verified_at | TIMESTAMPTZ NULL | |
+| status | ENUM('pending','active','suspended') | |
+
+## Tabel: `worker_skills`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| worker_id | UUID (FK→worker_profiles) | |
+| category_code | VARCHAR(10) | AC, BGN, LST, etc |
+| experience_years | INTEGER NULL | |
+
+## Tabel: `service_categories`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| code | VARCHAR(10) (PK) | AC, BGN, LST, PLB, etc |
+| name | VARCHAR(50) | "AC & Pendingin" |
+| icon_url | TEXT | |
+| is_active | BOOLEAN DEFAULT true | |
+
+## Tabel: `services`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| category_code | VARCHAR(10) (FK) | |
+| name | VARCHAR(100) | "Cuci AC Split" |
+| description | TEXT NULL | |
+| base_hourly_rate | INTEGER DEFAULT 30000 | Tarif per jam |
+| base_daily_rate | INTEGER DEFAULT 150000 | Tarif per hari |
+| min_hours | INTEGER DEFAULT 2 | Minimum jam |
+| is_active | BOOLEAN DEFAULT true | |
+
+## Tabel: `orders`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| order_number | VARCHAR(20) UNIQUE | "ORD-20260730-XXXX" |
+| customer_id | UUID (FK→users) | |
+| worker_id | UUID (FK→users) NULL | Assigned setelah match |
+| service_id | UUID (FK→services) | |
+| status | VARCHAR(20) | State machine |
+| pricing_scheme | ENUM('hourly','daily') | |
+| estimated_duration | INTEGER | Jam atau hari |
+| description | TEXT NULL | Catatan pelanggan |
+| photos | TEXT[] | Array URL foto masalah |
+| address_id | UUID (FK→addresses) | Lokasi pekerjaan |
+| customer_location | GEOGRAPHY(Point, 4326) | Snapshot lokasi order |
+| scheduled_at | TIMESTAMPTZ NULL | NULL = sekarang |
+| started_at | TIMESTAMPTZ NULL | |
+| completed_at | TIMESTAMPTZ NULL | |
+| created_at | TIMESTAMPTZ | |
+
+## Tabel: `order_pricing`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| order_id | UUID (FK→orders) UNIQUE | |
+| base_rate | INTEGER | Tarif dasar total |
+| distance_km | DECIMAL(5,1) | Jarak terhitung |
+| travel_cost | INTEGER | distance × 1000 |
+| surcharge_holiday | INTEGER DEFAULT 0 | |
+| surcharge_night | INTEGER DEFAULT 0 | |
+| surcharge_weekend | INTEGER DEFAULT 0 | |
+| surcharge_urgent | INTEGER DEFAULT 0 | |
+| surcharge_floor | INTEGER DEFAULT 0 | |
+| total_estimate | INTEGER | Estimasi saat booking |
+| total_final | INTEGER NULL | Final setelah selesai |
+| actual_duration | DECIMAL(4,1) NULL | Durasi aktual |
+
+## Tabel: `payments`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| order_id | UUID (FK→orders) | |
+| amount | INTEGER | Jumlah bayar |
+| method | ENUM('qris','cash') | |
+| status | ENUM('pending','paid','refunded') | |
+| paid_at | TIMESTAMPTZ NULL | |
+| reference | VARCHAR(100) NULL | ID transaksi gateway |
+
+## Tabel: `reviews`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| order_id | UUID (FK→orders) UNIQUE | |
+| customer_id | UUID (FK→users) | |
+| worker_id | UUID (FK→users) | |
+| rating | INTEGER CHECK(1-5) | Bintang 1-5 |
+| comment | TEXT NULL | |
+| photos | TEXT[] | Foto hasil kerja |
+| created_at | TIMESTAMPTZ | |
+
+## Tabel: `worker_wallets`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| worker_id | UUID (FK→users) UNIQUE | |
+| balance | INTEGER DEFAULT 0 | Saldo (Rupiah) |
+| total_earned | INTEGER DEFAULT 0 | Total pendapatan |
+
+## Tabel: `wallet_transactions`
+
+| Kolom | Tipe | Keterangan |
+| ------- | ------ | ------------ |
+| id | UUID (PK) | |
+| wallet_id | UUID (FK→worker_wallets) | |
+| type | ENUM('credit','debit') | |
+| amount | INTEGER | |
+| description | VARCHAR(200) | |
+| reference_order_id | UUID NULL | |
+| created_at | TIMESTAMPTZ | |
+
+---
+
+## Indexes
+
+```sql
+CREATE INDEX idx_workers_location ON worker_profiles USING GIST(home_location);
+CREATE INDEX idx_workers_available ON worker_profiles(is_available) WHERE status = 'active';
+CREATE INDEX idx_orders_customer ON orders(customer_id, created_at DESC);
+CREATE INDEX idx_orders_worker ON orders(worker_id, status);
+CREATE INDEX idx_orders_status ON orders(status, created_at);
+CREATE INDEX idx_worker_skills_category ON worker_skills(category_code, worker_id);
+CREATE INDEX idx_addresses_user ON addresses(user_id);
+```
+
+
+################################################################################
+# FILE: docs/04-api-endpoints.md
+################################################################################
+
+# TukangNDeso — REST API
+
+Base URL: `https://api.tukangndeso.id/v1`
+Auth: `Authorization: Bearer <jwt>`
+Response format: `{ success, data?, error?, meta? }`
+
+## Auth
+
+| Method | Path | Deskripsi |
+| -------- | ------ | ----------- |
+| POST | `/auth/otp/request` | Kirim OTP ke nomor HP |
+| POST | `/auth/otp/verify` | Verifikasi OTP → JWT |
+| POST | `/auth/register` | Lengkapi profil setelah OTP |
+| POST | `/auth/refresh` | Refresh JWT |
+| POST | `/auth/logout` | Invalidate token |
+
+**POST `/auth/otp/request`**
+
+```json
+{ "phone": "081234567890" }
+```
+
+**POST `/auth/otp/verify`**
+
+```json
+{ "phone": "081234567890", "code": "123456" }
+```
+
+→ `{ token, refresh_token, user }`
+
+## Users & Profil
+
+| Method | Path | Deskripsi |
+| -------- | ------ | ----------- |
+| GET | `/me` | Profil user login |
+| PATCH | `/me` | Update profil |
+| GET | `/me/addresses` | List alamat |
+| POST | `/me/addresses` | Tambah alamat |
+| PATCH | `/me/addresses/:id` | Update alamat |
+| DELETE | `/me/addresses/:id` | Hapus alamat |
+
+## Layanan (Public)
+
+| Method | Path | Deskripsi |
+| -------- | ------ | ----------- |
+| GET | `/categories` | List kategori aktif |
+| GET | `/categories/:code/services` | List layanan per kategori |
+| GET | `/services/:id` | Detail layanan |
+
+## Estimasi Harga
+
+**POST `/pricing/estimate`**
+
+```json
+{
+  "service_id": "uuid",
+  "pricing_scheme": "hourly",
+  "duration": 3,
+  "customer_location": { "lat": -6.2, "lng": 106.8 },
+  "scheduled_at": "2026-07-30T20:00:00+07:00",
+  "floor_level": 1,
+  "is_urgent": false
+}
+```
+
+Response:
+
+```json
+{
+  "base_rate": 90000,
+  "distance_km": 12.4,
+  "travel_cost": 12400,
+  "surcharge": {
+    "night": 27000,
+    "weekend": 0,
+    "holiday": 0,
+    "urgent": 0,
+    "floor": 0
+  },
+  "total_estimate": 129400,
+  "breakdown_text": "Tarif 3 jam × Rp30.000 + Ongkos 12.4 km + Malam +30%"
+}
+```
+
+## Orders (Customer)
+
+| Method | Path | Deskripsi |
+| -------- | ------ | ----------- |
+| POST | `/orders` | Buat order baru |
+| GET | `/orders` | Riwayat order customer |
+| GET | `/orders/:id` | Detail order |
+| POST | `/orders/:id/cancel` | Batal (dgn alasan) |
+| POST | `/orders/:id/confirm` | Konfirmasi selesai |
+| POST | `/orders/:id/pay` | Generate QRIS untuk order |
+| POST | `/orders/:id/review` | Kirim rating |
+
+**POST `/orders`**
+
+```json
+{
+  "service_id": "uuid",
+  "pricing_scheme": "hourly",
+  "estimated_duration": 3,
+  "description": "AC bocor di kamar utama",
+  "photos": ["url1", "url2"],
+  "address_id": "uuid",
+  "scheduled_at": null,
+  "is_urgent": false
+}
+```
+
+## Orders (Worker)
+
+| Method | Path | Deskripsi |
+| -------- | ------ | ----------- |
+| GET | `/worker/orders/incoming` | Order yang di-assign |
+| GET | `/worker/orders/active` | Order berjalan |
+| GET | `/worker/orders/history` | Riwayat |
+| POST | `/worker/orders/:id/accept` | Terima order |
+| POST | `/worker/orders/:id/reject` | Tolak order |
+| POST | `/worker/orders/:id/arrive` | Konfirmasi tiba |
+| POST | `/worker/orders/:id/start` | Mulai kerja |
+| POST | `/worker/orders/:id/complete` | Selesai |
+
+## Worker Profile
+
+| Method | Path | Deskripsi |
+| -------- | ------ | ----------- |
+| POST | `/worker/register` | Daftar sebagai tukang |
+| GET | `/worker/profile` | Profil tukang |
+| PATCH | `/worker/profile` | Update profil |
+| POST | `/worker/availability` | Toggle online/offline |
+| GET | `/worker/wallet` | Saldo & transaksi |
+| POST | `/worker/wallet/withdraw` | Tarik saldo |
+
+**POST `/worker/availability`**
+
+```json
+{ "is_available": true, "current_location": { "lat": -6.2, "lng": 106.8 } }
+```
+
+## Realtime (WebSocket)
+
+Endpoint: `wss://api.tukangndeso.id/v1/realtime`
+
+Events dari server → client:
+
+- `order.new_match` — order baru untuk tukang
+- `order.status_changed` — perubahan status ke customer/worker
+- `worker.location_update` — update posisi tukang ke customer saat en-route
+- `chat.message` — pesan chat antara customer & worker
+
+## Payment (QRIS)
+
+| Method | Path | Deskripsi |
+|--------|------|-----------|
+| POST | `/payments/qris/create` | Buat dynamic QRIS untuk order |
+| GET | `/payments/:id/status` | Cek status pembayaran |
+| POST | `/payments/webhook/qris` | Webhook callback dari provider |
+| POST | `/payments/:id/refund` | Refund (admin only) |
+
+**POST `/payments/qris/create`**
+
+```json
+{ "order_id": "uuid" }
+```
+
+Response:
+
+```json
+{
+  "payment_id": "uuid",
+  "qr_string": "00020101021226...630401AB",
+  "qr_image_url": "https://cdn.tukangndeso.id/qr/xxx.png",
+  "amount": 129400,
+  "expires_at": "2026-07-30T14:15:00+07:00",
+  "status": "pending"
+}
+```
+
+**Webhook `/payments/webhook/qris`** (dari Midtrans/Xendit/DANA)
+
+- Verifikasi signature header wajib.
+- Idempotent: order yang sudah `paid` diabaikan.
+- Update `payments.status` → `paid` dan trigger kredit saldo tukang.
+
+## Upload
+
+| Method | Path | Deskripsi |
+|--------|------|-----------|
+| POST | `/upload/image` | Upload foto (multipart) |
+
+Response: `{ url, size, mime_type }`
+
+## Admin (Internal)
+
+| Method | Path | Deskripsi |
+| -------- | ------ | ----------- |
+| GET | `/admin/workers/pending` | Tukang menunggu verifikasi |
+| POST | `/admin/workers/:id/verify` | Approve tukang |
+| POST | `/admin/workers/:id/suspend` | Suspend tukang |
+| GET | `/admin/disputes` | List dispute |
+| POST | `/admin/disputes/:id/resolve` | Resolve dispute |
+
+## Error Response
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_OTP",
+    "message": "Kode OTP salah atau kadaluarsa"
+  }
+}
+```
+
+| Code | HTTP | Arti |
+| ------ | ------ | ------ |
+| VALIDATION_ERROR | 400 | Input tidak valid |
+| UNAUTHORIZED | 401 | Token invalid/expired |
+| FORBIDDEN | 403 | Tidak punya akses |
+| NOT_FOUND | 404 | Resource tidak ada |
+| CONFLICT | 409 | State conflict (misal double booking) |
+| OUT_OF_SERVICE_AREA | 422 | Di luar radius layanan |
+| NO_WORKER_AVAILABLE | 422 | Tidak ada tukang tersedia |
+| SERVER_ERROR | 500 | Error internal |
+
+
+################################################################################
+# FILE: docs/05-app-screens.md
+################################################################################
+
+# TukangNDeso — Daftar Layar & Komponen
+
+Stack disarankan: **Flutter** + **Riverpod** (state) + **go_router** (navigasi) + **Dio** (HTTP).
+
+## A. Pelanggan (Customer)
+
+### 1. Splash & Onboarding
+
+- **SplashScreen** — logo + cek token
+- **OnboardingScreen** — 3 slide (perkenalan, kategori, harga transparan)
+
+### 2. Auth
+
+- **PhoneInputScreen** — input nomor HP
+- **OtpVerifyScreen** — 6 digit OTP
+- **CompleteProfileScreen** — nama + alamat pertama
+
+### 3. Home
+
+- **HomeScreen** — search bar, banner promo, grid kategori (9 kategori), section "Tukang terdekat", "Order berjalan"
+- **CategoryListScreen** — semua kategori dgn ikon
+- **ServiceListScreen** — daftar sub-layanan per kategori
+
+### 4. Booking Flow
+
+- **ServiceDetailScreen** — deskripsi + tarif dasar
+- **BookingFormScreen** — deskripsi masalah, foto, alamat, jadwal, skema (jam/hari), durasi
+- **PriceEstimateScreen** — breakdown harga + tombol "Cari Tukang"
+- **SearchingWorkerScreen** — loading animasi "mencari tukang terdekat…" dgn timeout 60 detik
+- **BookingConfirmedScreen** — order berhasil, redirect ke tracking
+
+### 5. Order Tracking
+
+- **OrderTrackingScreen** — peta real-time posisi tukang, ETA, status, tombol chat/call
+- **ChatScreen** — pesan dgn tukang
+- **OrderDetailScreen** — semua info order (baca-tulis tergantung status)
+
+### 6. Payment & Review
+
+- **PaymentScreen** — tampilkan QRIS (dynamic QR) atau opsi bayar cash, konfirmasi jumlah
+- **ReviewScreen** — bintang 1-5, komentar, upload foto hasil
+
+### 7. Profile
+
+- **ProfileScreen** — foto, nama, menu (alamat, order, pembayaran, bantuan, logout)
+- **AddressListScreen** — kelola alamat
+- **AddressEditScreen** — form alamat + peta
+- **OrderHistoryScreen** — list order lama
+- **HelpScreen** — FAQ + kontak CS
+
+## B. Tukang (Worker)
+
+### 1. Auth & Registrasi
+
+- **WorkerRegisterScreen** — nama, HP, KTP, alamat, kategori keahlian, radius kerja
+- **WorkerPendingVerificationScreen** — status "menunggu verifikasi admin"
+
+### 2. Dashboard
+
+- **WorkerHomeScreen** — toggle online/offline, saldo hari ini, jumlah order, rating rata-rata, map area
+- **IncomingOrderScreen** (modal/full) — detail order masuk, tombol Terima/Tolak, countdown 3 menit
+
+### 3. Active Order
+
+- **WorkerOrderTrackingScreen** — navigasi ke lokasi customer (buka Google Maps), tombol "Saya Tiba"
+- **WorkerOrderInProgressScreen** — timer durasi kerja, tombol "Selesai", upload foto hasil
+
+### 4. Wallet & History
+
+- **WorkerWalletScreen** — saldo, tombol tarik, riwayat transaksi
+- **WithdrawScreen** — form tarik (nomor rekening/e-wallet)
+- **WorkerOrderHistoryScreen** — riwayat order + earning
+
+### 5. Profile
+
+- **WorkerProfileScreen** — edit profil, kategori keahlian, radius, foto portofolio
+- **WorkerRatingScreen** — semua review dari pelanggan
+
+## Komponen Reusable
+
+| Komponen | Fungsi |
+| ---------- | -------- |
+| `PriceBreakdownCard` | Tampilkan breakdown harga (base + travel + surcharge) |
+| `CategoryIconTile` | Tile kategori dgn ikon + nama |
+| `OrderStatusBadge` | Badge warna sesuai status order |
+| `WorkerCard` | Ringkasan tukang (foto, nama, rating, jarak) |
+| `LocationPicker` | Widget pilih lokasi (map + search) |
+| `PhotoUploader` | Multi-foto uploader dgn preview |
+| `RatingStars` | Bintang interaktif 1-5 |
+| `ChatBubble` | Bubble chat customer/worker |
+| `MapTracking` | Widget peta dgn marker posisi tukang |
+
+## Design System (Ringkas)
+
+**Warna**
+
+- Primary: `#FF6B35` (oranye — kesan energik, kerja lapangan)
+- Secondary: `#2C3E50` (navy — profesional)
+- Success: `#27AE60`
+- Warning: `#F39C12`
+- Danger: `#E74C3C`
+- Background: `#F8F9FA`
+- Text: `#2C3E50` / `#7F8C8D`
+
+**Font**
+
+- Heading: Inter Bold
+- Body: Inter Regular
+- Numeric (harga, timer): Inter Medium tabular
+
+**Spacing:** 4, 8, 12, 16, 24, 32, 48 (kelipatan 4)
+**Radius:** 8 (kartu kecil), 12 (kartu besar), 24 (tombol pill)
+
+## Navigasi
+
+**Customer bottom nav:** Home · Order · Chat · Profile
+**Worker bottom nav:** Dashboard · Order · Wallet · Profile
+
+
+################################################################################
+# FILE: docs/06-mvp-roadmap.md
+################################################################################
+
+# TukangNDeso — MVP Roadmap
+
+## Prinsip
+
+- **MVP dulu, feature lengkap belakangan** — validasi cepat di Mojokerto Kabupaten
+- Fokus 1 kategori dulu (misal AC), lalu ekspansi
+- Backend & app dikerjakan paralel setelah kontrak API disepakati
+
+## Fase 0 — Persiapan (Minggu 1)
+
+- [ ] Review & approve semua dokumen di `docs/`
+- [ ] Finalisasi model harga (dgn contoh kasus real)
+- [ ] Siapkan repo git (mono-repo: `app/`, `api/`, `admin/`)
+- [ ] Setup env: Flutter, Node.js/Bun, PostgreSQL+PostGIS, Redis
+- [ ] Pilih layanan pihak ketiga:
+  - [ ] SMS OTP gateway (Zenziva/Twilio/Fonnte WA)
+  - [ ] Peta (Google Maps / Mapbox)
+  - [ ] QRIS provider (Midtrans/Xendit/DANA Bisnis)
+  - [ ] Storage foto (S3/Cloudinary/Supabase Storage)
+  - [ ] Push notif (FCM)
+
+## Fase 1 — Backend Foundation (Minggu 2-3)
+
+- [ ] Setup project Node.js/Bun + Express/Hono/Fastify + TypeScript strict
+- [ ] Migrations semua tabel (Prisma/Drizzle)
+- [ ] Seed data: kategori + services default (30 service dasar)
+- [ ] Auth: OTP request/verify + JWT
+- [ ] Users: profil + addresses CRUD
+- [ ] Services: list + detail
+- [ ] Pricing calculator (unit test wajib untuk formula)
+- [ ] Upload endpoint
+
+**Deliverable:** API bisa dipanggil via Postman, unit test pass.
+
+## Fase 2 — Customer App MVP (Minggu 4-5)
+
+- [ ] Setup Flutter project (Riverpod, go_router, Dio)
+- [ ] Splash + Onboarding + Auth flow
+- [ ] Home + Category + Service list
+- [ ] Booking form + Price estimate
+- [ ] Order tracking (polling dulu, WS nanti)
+- [ ] Payment QRIS + cash sebagai fallback
+- [ ] Rating + Review
+
+**Deliverable:** APK internal testing, bisa order dari HP.
+
+## Fase 3 — Worker App + Matching (Minggu 6-7)
+
+- [ ] Endpoint order matching (query PostGIS: worker dalam radius + skill sesuai + is_available)
+- [ ] Worker registration + admin approval flow
+- [ ] Worker app: dashboard, incoming order, active order
+- [ ] WebSocket untuk notifikasi order + location update
+- [ ] Wallet + transaksi otomatis saat order paid
+
+**Deliverable:** End-to-end order dari customer → matched → dikerjakan tukang → selesai.
+
+## Fase 4 — Payment & Polish (Minggu 8)
+
+- [ ] Integrasi QRIS production (dynamic QR per transaksi)
+- [ ] Push notification (FCM)
+- [ ] Chat customer ↔ worker
+- [ ] Cancellation flow + refund
+- [ ] Dispute basic (lapor ke admin via WA/email)
+
+**Deliverable:** Aplikasi siap soft launch di Mojokerto Kabupaten.
+
+## Fase 5 — Admin Panel (Minggu 9)
+
+- [ ] Web admin sederhana (Next.js atau Retool)
+- [ ] Verifikasi tukang
+- [ ] Monitor order aktif
+- [ ] Handle dispute
+- [ ] Laporan basic (order/hari, revenue, top workers)
+
+## Fase 6 — Soft Launch (Minggu 10)
+
+- [ ] Rekrut 20-30 tukang di 1 kecamatan Mojokerto Kab
+- [ ] Onboarding tukang (training pakai app, foto profil, KTP)
+- [ ] Marketing lokal (poster, WA broadcast, testimoni)
+- [ ] Monitor & fix bug harian
+- [ ] Kumpulkan feedback
+
+## Post-MVP (Bulan 3+)
+
+- Multi kategori aktif
+- Perluas kota
+- Loyalty program (voucher, cashback)
+- Subscription customer (paket bulanan servis AC)
+- B2B (kontrak dgn perumahan/apartemen)
+- Referral tukang
+- Rating trust score untuk auto-priority
+- Chat dgn foto + voice note
+- Estimasi selesai berbasis histori pekerjaan sejenis
+
+## Ukuran Tim Minimum
+
+| Peran | Fase 1-3 | Fase 4+ |
+| ------- | ---------- | --------- |
+| Backend | 1 | 2 |
+| Flutter (customer) | 1 | 1 |
+| Flutter (worker) | (bareng customer) | 1 |
+| Admin/Web | — | 1 |
+| Designer | 0.5 (part-time) | 0.5 |
+| PM/Ops | 1 | 1 |
+
+Total 3-4 orang untuk MVP, tumbuh 6 orang saat post-launch.
+
+## Estimasi Biaya Infrastruktur (per bulan, tahap awal)
+
+| Item | Perkiraan |
+| ------ | ----------- |
+| VPS backend (2vCPU/4GB) | Rp 250.000 |
+| PostgreSQL managed (basic) | Rp 400.000 |
+| Redis | Rp 150.000 |
+| S3/storage foto (50GB) | Rp 100.000 |
+| Google Maps API | Rp 300.000-1.000.000 (tergantung volume) |
+| SMS/WA OTP | Rp 200 × jumlah OTP |
+| Push notif (FCM) | Gratis |
+| Domain + SSL | Rp 20.000 |
+| **Total baseline** | **~Rp 1.500.000 - 2.500.000/bulan** |
+
+
+################################################################################
+# FILE: docs/07-daily-execution-plan.md
+################################################################################
+
+# TukangNDeso — Rencana Kerja Harian
+
+Rencana ini memakai asumsi tim minimum: 1 backend, 1 Flutter, 1 product/QA merangkap operasional. Durasi dapat diperpanjang jika dikerjakan sendiri.
+
+## Minggu 1 — Validasi Produk dan Setup
+
+### Hari 1 — Tetapkan ruang lingkup
+
+- Putuskan kota/kecamatan peluncuran pertama.
+- Pilih kategori awal; rekomendasi: AC dan bangunan ringan.
+- Tetapkan apakah tukang membawa material sendiri atau hanya tenaga kerja.
+- Tulis 10 contoh order nyata dari pelanggan potensial.
+- Output: daftar fitur MVP dan daftar fitur yang ditunda.
+
+### Hari 2 — Validasi harga lapangan
+
+- Wawancarai minimal 5 tukang dan 5 calon pelanggan.
+- Validasi tarif Rp30.000/jam dan Rp150.000/hari.
+- Validasi apakah ongkos jarak Rp1.000/km realistis; tetapkan siapa yang menanggungnya.
+- Tentukan minimum tarif, radius maksimum, pembatalan, dan biaya tunggu.
+- Output: price book v1 yang disetujui.
+
+### Hari 3 — Finalisasi alur bisnis
+
+- Gambar alur booking pelanggan.
+- Gambar alur menerima order tukang.
+- Tetapkan aturan timeout, pembatalan, refund, dan dispute.
+- Tetapkan kapan timer kerja dimulai dan berhenti.
+- Output: state machine order dan aturan transisi.
+
+### Hari 4 — Prototipe UX
+
+- Buat wireframe Home, Service Detail, Booking, Estimasi, Tracking, dan Review.
+- Buat wireframe Dashboard Tukang dan Order Masuk.
+- Uji prototipe kepada minimal 3 orang.
+- Catat istilah yang membingungkan, terutama "per jam", "per hari", dan "ongkos jalan".
+- Output: prototype low-fidelity yang telah direvisi.
+
+### Hari 5 — Keputusan teknis
+
+- Finalisasi Flutter, backend TypeScript, PostgreSQL/PostGIS, storage, maps, OTP, dan payment.
+- Buat diagram deployment sederhana.
+- Buat daftar environment variable tanpa memasukkan secret ke git.
+- Tetapkan strategi polling MVP; WebSocket dapat menyusul.
+- Output: dokumen keputusan teknis dan backlog prioritas.
+
+### Hari 6 — Setup repository
+
+- Buat struktur `app/`, `api/`, `admin/`, dan `docs/`.
+- Aktifkan TypeScript strict pada backend.
+- Tambahkan formatter, linter, test runner, dan pre-commit check.
+- Buat `.env.example` serta aturan secret management.
+- Output: repository dapat di-clone dan dijalankan oleh semua anggota tim.
+
+### Hari 7 — Review dan buffer
+
+- Review seluruh dokumen bersama stakeholder.
+- Perbaiki keputusan yang belum konsisten.
+- Buat seed data kategori dan layanan.
+- Sisakan waktu untuk hambatan setup.
+- Gate: jangan mulai implementasi jika formula harga dan status order belum disetujui.
+
+## Minggu 2 — Backend Foundation
+
+### Hari 8 — Database dan migrasi
+
+- Buat schema users, addresses, worker profiles, categories, services, orders, pricing, payments, dan reviews.
+- Aktifkan extension PostGIS.
+- Tambahkan foreign key, unique constraint, check constraint, dan index.
+- Buat migration rollback.
+- Tambahkan test migration pada database sementara.
+
+### Hari 9 — Seed dan repository
+
+- Masukkan kategori dan sub-layanan awal.
+- Buat repository untuk user, address, service, dan worker.
+- Pastikan query lokasi memakai parameter terikat, bukan string interpolation.
+- Tambahkan test untuk query radius dan filter skill.
+
+### Hari 10 — Auth OTP
+
+- Implementasi request OTP dengan rate limit per nomor dan IP.
+- Simpan OTP dalam bentuk hash dengan masa berlaku singkat.
+- Implementasi verifikasi, JWT access token, refresh token, dan logout.
+- Uji OTP benar, salah, kedaluwarsa, dan terlalu banyak percobaan.
+
+### Hari 11 — Profil dan alamat
+
+- Implementasi `GET/PATCH /me`.
+- Implementasi CRUD alamat.
+- Validasi latitude, longitude, nomor telepon, dan alamat wajib.
+- Tambahkan default address dengan aturan hanya satu alamat default.
+
+### Hari 12 — Kategori dan layanan
+
+- Implementasi endpoint kategori dan layanan.
+- Tambahkan filter aktif/nonaktif.
+- Buat response contract yang konsisten.
+- Tambahkan OpenAPI atau koleksi API untuk pengujian manual.
+
+### Hari 13 — Kalkulator harga: RED
+
+- Tulis unit test untuk tarif per jam, per hari, minimum jam, dan jarak.
+- Tulis test surcharge malam, weekend, libur, urgent, dan lantai.
+- Tulis test pembulatan jarak dan batas minimum/maksimum ongkos.
+- Pastikan test gagal karena implementasi kalkulator belum ada.
+
+### Hari 14 — Kalkulator harga: GREEN
+
+- Implementasikan kalkulator harga murni tanpa akses database.
+- Gunakan integer Rupiah untuk menghindari error pecahan uang.
+- Implementasikan `POST /pricing/estimate`.
+- Jalankan seluruh unit test dan test edge case.
+- Gate: setiap total harus memiliki breakdown yang dapat dijelaskan ke pelanggan.
+
+## Minggu 3 — Order dan Matching
+
+### Hari 15 — Membuat order
+
+- Implementasi `POST /orders`.
+- Simpan snapshot tarif dan lokasi saat booking.
+- Validasi service, alamat, jadwal, durasi, dan area layanan.
+- Pastikan request duplikat tidak membuat order ganda.
+
+### Hari 16 — Matching tukang
+
+- Cari tukang aktif berdasarkan kategori, skill, radius, dan jarak.
+- Urutkan berdasarkan jarak, rating, dan waktu sejak order terakhir.
+- Batasi jumlah kandidat awal.
+- Tambahkan fallback `NO_WORKER_AVAILABLE`.
+
+### Hari 17 — State machine order
+
+- Implementasikan transisi status yang diizinkan.
+- Tolak transisi ilegal, misalnya `COMPLETED` langsung dari `PENDING`.
+- Tambahkan audit log setiap perubahan status.
+- Uji pembatalan pelanggan dan tukang.
+
+### Hari 18 — Endpoint tukang
+
+- Implementasikan incoming orders, accept, reject, arrive, start, dan complete.
+- Terapkan optimistic locking agar dua tukang tidak menerima order yang sama.
+- Tambahkan timeout penerimaan order.
+
+### Hari 19 — Harga final dan penyelesaian
+
+- Simpan durasi aktual dan harga final.
+- Tetapkan aturan tambahan pekerjaan agar memerlukan persetujuan pelanggan.
+- Implementasikan konfirmasi selesai pelanggan.
+- Uji pekerjaan yang durasinya lebih lama dan lebih pendek dari estimasi.
+
+### Hari 20 — Upload dan notifikasi dasar
+
+- Implementasikan upload foto dengan tipe dan ukuran yang dibatasi.
+- Tambahkan push notification untuk perubahan status.
+- Jangan mencatat token, OTP, atau data KTP ke log.
+
+### Hari 21 — Integrasi backend
+
+- Jalankan alur end-to-end menggunakan Postman atau integration test.
+- Uji customer → matching → worker accept → start → complete.
+- Perbaiki kontrak response yang tidak konsisten.
+- Gate: API MVP stabil sebelum UI terhubung penuh.
+
+## Minggu 4 — Flutter Customer
+
+### Hari 22 — Bootstrap aplikasi
+
+- Buat project Flutter dengan flavor development dan production.
+- Setup Riverpod, go_router, Dio, secure storage, logger, dan error boundary.
+- Buat theme, typography, warna, spacing, dan komponen tombol.
+
+### Hari 23 — Onboarding dan auth
+
+- Implementasi splash dan pemeriksaan token.
+- Implementasi input nomor, OTP, resend timer, dan profil awal.
+- Tampilkan error user-facing dalam bahasa Indonesia.
+
+### Hari 24 — Home dan katalog
+
+- Implementasi Home, kategori, service list, dan service detail.
+- Tambahkan loading, empty state, dan retry state.
+- Hubungkan ke endpoint kategori dan layanan.
+
+### Hari 25 — Alamat dan lokasi
+
+- Implementasi daftar alamat dan tambah alamat.
+- Tambahkan map picker serta permission location.
+- Sediakan input manual jika GPS ditolak atau tidak akurat.
+
+### Hari 26 — Form booking
+
+- Implementasi deskripsi, foto, jadwal, skema harga, durasi, dan lantai.
+- Validasi form sebelum request estimasi.
+- Tampilkan ringkasan input sebelum lanjut.
+
+### Hari 27 — Estimasi dan submit order
+
+- Implementasikan price breakdown card.
+- Tampilkan tarif dasar, jarak, surcharge, dan total.
+- Tambahkan tombol submit dengan idempotency key.
+- Tampilkan pesan jika tidak ada tukang tersedia.
+
+### Hari 28 — Tracking dan status
+
+- Implementasikan order tracking berbasis polling.
+- Tampilkan status, detail tukang, ETA, call/chat placeholder, dan cancel.
+- Pastikan polling berhenti saat halaman ditutup atau order selesai.
+
+## Minggu 5 — Flutter Tukang
+
+### Hari 29 — Registrasi tukang
+
+- Implementasikan form profil, KTP, skill, radius, dan portofolio.
+- Validasi ukuran dan tipe file.
+- Tampilkan status menunggu verifikasi.
+
+### Hari 30 — Dashboard tukang
+
+- Implementasikan toggle online/offline.
+- Tampilkan saldo, rating, order aktif, dan ringkasan hari ini.
+- Minta konfirmasi sebelum mengaktifkan status online jika profil belum lengkap.
+
+### Hari 31 — Incoming order
+
+- Tampilkan detail order, jarak, estimasi bayaran, dan countdown.
+- Implementasikan accept/reject.
+- Tangani order kedaluwarsa dan konflik saat kandidat lain lebih dulu menerima.
+
+### Hari 32 — Perjalanan dan mulai kerja
+
+- Implementasikan navigasi eksternal ke Google Maps.
+- Tombol "Saya Tiba" mengubah status menjadi `ARRIVED`.
+- Tombol "Mulai Kerja" mengaktifkan timer server, bukan hanya timer perangkat.
+
+### Hari 33 — Penyelesaian pekerjaan
+
+- Implementasikan timer, foto hasil, catatan tambahan, dan selesai.
+- Minta konfirmasi jika harga final berubah dari estimasi.
+- Tampilkan status menunggu persetujuan pelanggan.
+
+### Hari 34 — Wallet dan riwayat
+
+- Tampilkan saldo, pendapatan, transaksi, dan riwayat order.
+- Implementasikan permintaan tarik dana sebagai status pending.
+- Jangan anggap saldo bertambah sebelum pembayaran sukses.
+
+### Hari 35 — Review integrasi tukang
+
+- Uji worker registration → approval → online → accept → complete.
+- Uji aplikasi saat koneksi lambat dan aplikasi dibuka kembali.
+- Perbaiki state recovery setelah force close.
+
+## Minggu 6 — Payment, Admin, dan QA
+
+### Hari 36 — Pembayaran cash (fallback)
+
+- Implementasikan metode cash sebagai fallback jika QRIS gagal.
+- Catat bukti pembayaran dan status secara eksplisit.
+- Tambahkan larangan menutup order tanpa metode pembayaran.
+
+### Hari 37 — Integrasi QRIS sandbox
+
+- Integrasikan payment gateway penyedia QRIS (Midtrans/Xendit/DANA Bisnis) di lingkungan sandbox.
+- Implementasikan generate dynamic QR per order dan webhook terverifikasi (idempotent).
+- Uji sukses, gagal, kedaluwarsa QR, refund, dan callback ganda.
+
+### Hari 38 — Admin panel minimum
+
+- Buat login admin terpisah.
+- Buat verifikasi tukang, daftar order aktif, dan daftar dispute.
+- Pisahkan role admin dan jangan memakai akun pelanggan sebagai admin.
+
+### Hari 39 — Cancellation dan dispute
+
+- Tambahkan pilihan alasan pembatalan.
+- Terapkan aturan biaya pembatalan setelah tukang berangkat.
+- Buat tiket dispute dan lampiran bukti.
+- Pastikan admin dapat mengubah resolusi dengan audit trail.
+
+### Hari 40 — QA fungsional
+
+- Jalankan test matrix customer, worker, admin, jaringan lambat, permission GPS, dan upload.
+- Uji nominal Rp0, durasi minimum, jarak batas, order malam, weekend, dan libur.
+- Verifikasi semua error user-facing berbahasa Indonesia.
+
+### Hari 41 — Security dan privacy
+
+- Periksa authorization setiap endpoint.
+- Pastikan KTP dan foto privat memakai URL bertanda tangan atau akses terproteksi.
+- Uji rate limit OTP, upload abuse, replay webhook, dan IDOR.
+- Hapus secret dari repository dan log.
+
+### Hari 42 — Release candidate
+
+- Buat APK internal testing.
+- Jalankan smoke test instalasi, login, booking, accept, selesai, dan review.
+- Catat bug blocker dan lakukan perbaikan terakhir.
+- Gate: hanya bug kritis yang boleh tersisa sebelum soft launch.
+
+## Minggu 7 — Pilot Lapangan
+
+### Hari 43 — Rekrut tukang
+
+- Rekrut 20–30 tukang pada satu kecamatan di Mojokerto Kabupaten.
+- Verifikasi identitas dan skill secara manual.
+- Foto profil harus jelas dan seragam.
+
+### Hari 44 — Pelatihan tukang
+
+- Simulasikan menerima order, navigasi, timer, foto, selesai, dan dispute.
+- Berikan SOP komunikasi dan larangan meminta pembayaran di luar aplikasi tanpa catatan.
+
+### Hari 45 — Uji dengan pelanggan terbatas
+
+- Ajak 5–10 pelanggan melakukan order nyata.
+- Dampingi order pertama secara manual.
+- Catat waktu matching, waktu tiba, harga, dan keluhan.
+
+### Hari 46 — Perbaikan operasi
+
+- Perbaiki area yang tidak memiliki tukang cukup.
+- Tinjau ulang tarif perjalanan dan minimum order.
+- Tambahkan FAQ berdasarkan pertanyaan berulang.
+
+### Hari 47 — Monitoring
+
+- Pantau order sukses, cancel, no-worker, waktu respons, dan rating.
+- Buat dashboard sederhana atau laporan harian.
+- Siapkan prosedur incident response.
+
+### Hari 48 — Soft launch terbatas
+
+- Buka pendaftaran untuk satu kecamatan di Mojokerto Kabupaten atau komunitas tertentu.
+- Batasi kategori dan jumlah order harian jika operasional belum stabil.
+- Sediakan kontak bantuan yang benar-benar aktif.
+
+### Hari 49 — Evaluasi dan keputusan scale
+
+- Bandingkan KPI dengan target.
+- Putuskan: perbaiki produk, tambah tukang, ubah harga, atau perluas area.
+- Bekukan fitur baru sampai masalah operasional utama selesai.
+
+## KPI Pilot Minimum
+
+| KPI | Target awal |
+| ----- | ------------- |
+| Order berhasil selesai | ≥80% dari order dibuat |
+| Waktu menemukan tukang | <10 menit |
+| Tukang tiba sesuai jadwal | ≥85% |
+| Rating rata-rata | ≥4,3/5 |
+| Pembatalan pelanggan | <15% |
+| Pembatalan tukang | <10% |
+| Sengketa | <5% |
+| Crash-free session | ≥99% |
+
+## Catatan Keputusan Harga
+
+Angka dalam dokumen ini adalah **nilai awal yang harus divalidasi di lapangan**, bukan janji harga final. Sebelum peluncuran, tetapkan secara tertulis:
+
+- Apakah `Rp1.000/km` dihitung satu arah atau pulang-pergi.
+- Sumber perhitungan jarak: rute jalan atau garis lurus.
+- Siapa yang membayar material, parkir, tol, dan biaya tambahan.
+- Apakah tarif harian berlaku untuk delapan jam penuh atau jam kerja yang berbeda.
+- Persentase fee platform dan apakah fee ditambahkan ke pelanggan atau dipotong dari tukang.
+- Biaya MDR (merchant discount rate) QRIS ditanggung platform atau dipotong dari tukang.
+- Mekanisme persetujuan pelanggan untuk pekerjaan tambahan.
+
+
+################################################################################
+# FILE: docs/08-mojokerto-operations.md
+################################################################################
+
+# TukangNDeso — Operasional Mojokerto Kabupaten
+
+## Area Layanan
+
+**Lokasi:** Kabupaten Mojokerto, Jawa Timur (di luar Kota Mojokerto).
+
+**18 Kecamatan Kabupaten Mojokerto:**
+
+| # | Kecamatan | Prioritas |
+|---|-----------|-----------|
+| 1 | Mojosari | Tinggi (ibu kota kab, pusat aktivitas) |
+| 2 | Sooko | Tinggi (dekat Kota Mojokerto, populasi padat) |
+| 3 | Puri | Tinggi (industri + perumahan) |
+| 4 | Trowulan | Menengah (wisata + rumah tangga) |
+| 5 | Jetis | Menengah (industri berat) |
+| 6 | Ngoro | Menengah (kawasan industri) |
+| 7 | Pungging | Menengah |
+| 8 | Bangsal | Menengah |
+| 9 | Mojoanyar | Menengah |
+| 10 | Dlanggu | Rendah |
+| 11 | Gedeg | Rendah |
+| 12 | Kemlagi | Rendah |
+| 13 | Dawarblandong | Rendah (jauh dari pusat) |
+| 14 | Kutorejo | Rendah |
+| 15 | Gondang | Rendah |
+| 16 | Jatirejo | Rendah |
+| 17 | Pacet | Rendah (wisata pegunungan) |
+| 18 | Trawas | Rendah (wisata pegunungan) |
+
+## Strategi Peluncuran
+
+### Fase 1 — Pilot (Minggu 7)
+
+Fokus **4 kecamatan prioritas tinggi + menengah dekat pusat**:
+
+- Mojosari
+- Sooko
+- Puri
+- Trowulan
+
+Alasan: kepadatan penduduk tinggi, dekat dgn Kota Mojokerto, akses jalan bagus, potensi order per hari lebih tinggi. Target: 20-30 tukang aktif.
+
+### Fase 2 — Ekspansi (Bulan 3-4)
+
+Tambahkan kecamatan menengah:
+
+- Jetis, Ngoro, Pungging, Bangsal, Mojoanyar
+
+### Fase 3 — Full coverage (Bulan 6+)
+
+Kecamatan pinggiran + Pacet & Trawas (untuk wisata + villa).
+
+## Konfigurasi Area di Aplikasi
+
+### Radius Layanan Maksimum
+
+- **Default:** 25 km dari titik pelanggan
+- **Alasan:** Radius kabupaten Mojokerto ± 25 km diameter. Di atas ini biaya perjalanan tidak masuk akal (>Rp 25.000 hanya untuk transport).
+- **Enforcement:** endpoint `/pricing/estimate` menolak dgn `OUT_OF_SERVICE_AREA` jika jarak > 25 km.
+
+### Bounding Box (untuk validasi lokasi)
+
+```
+Lat  : -7.60  s.d.  -7.35
+Lng  : 112.35 s.d.  112.75
+```
+
+Lokasi di luar box ini otomatis ditolak saat booking (mencegah alamat salah input di luar kabupaten).
+
+## Karakteristik Pasar Mojokerto Kabupaten
+
+### Peluang
+
+- **Populasi:** ± 1.1 juta jiwa (BPS 2023), banyak rumah tangga
+- **Kawasan industri Ngoro, Jetis** — kos-kosan karyawan, banyak perbaikan AC & listrik
+- **Trowulan** — wisata sejarah, banyak homestay + warung
+- **Jarak antar kecamatan pendek** — cocok untuk model per jam
+- **Kompetitor lokal minim** — mayoritas cari tukang lewat WA grup / kenalan
+
+### Tantangan
+
+- **Literasi digital rendah di beberapa area** — tukang usia 40+ butuh onboarding manual
+- **QRIS belum familiar untuk sebagian tukang** — perlu edukasi cara cek pembayaran
+- **Musim tanam padi (Feb-Apr, Agt-Okt)** — sebagian tukang beralih ke sawah
+- **Jam kerja lokal:** biasanya berhenti setelah maghrib, weekend banyak yang libur
+
+## Penyesuaian Tarif untuk Mojokerto
+
+Tarif nasional generik perlu dicek ulang di lapangan. Berikut hipotesis awal:
+
+| Item | Nasional (usulan) | Mojokerto Kab (hipotesis) |
+|------|-------------------|---------------------------|
+| Per jam | Rp 30.000 | **Rp 25.000-30.000** |
+| Per hari | Rp 150.000 | **Rp 120.000-150.000** |
+| Ongkos jalan | Rp 1.000/km | **Rp 1.500/km** (motor + BBM) |
+| Minimum jam | 2 jam | 2 jam (tetap) |
+| Surcharge malam | +30% | +20% (jam kerja lokal lebih pendek) |
+
+**Wajib validasi di Hari 2 (wawancara 5 tukang + 5 pelanggan).** Angka final baru bisa ditetapkan setelah data lapangan masuk.
+
+## Payment: QRIS
+
+### Alur Bayar Pelanggan
+
+1. Order selesai → tekan "Bayar" di app
+2. App tampilkan **QR statis merchant TukangNDeso** dengan nominal dinamis
+3. Pelanggan scan pakai app apapun (Dana, OVO, GoPay, ShopeePay, BCA, Mandiri, BRI, BNI, dll)
+4. Konfirmasi bayar → webhook masuk → status `PAID` → saldo tukang bertambah
+
+### Alur Cash (Fallback)
+
+1. Bila QRIS gagal / pelanggan minta cash
+2. Tukang tekan "Terima Cash" di app worker
+3. Pelanggan konfirmasi "Sudah Bayar" di app customer
+4. Status `PAID` — tapi platform harus tagih fee via top-up dari saldo tukang
+
+### QRIS Provider (perlu dipilih)
+
+| Provider | Kelebihan | Kekurangan |
+|----------|-----------|------------|
+| **Midtrans** | Dokumentasi bagus, banyak yang pakai, MDR 0.7% | Perlu badan usaha |
+| **Xendit** | Support QRIS + fitur payout langsung | MDR sekitar 0.7% |
+| **DANA Bisnis** | Fee lebih rendah, integrasi cepat | Hanya untuk yang punya bisnis terdaftar |
+| **iPaymu / DOKU** | Alternatif lokal | Ekosistem lebih kecil |
+
+**Rekomendasi:** mulai dengan **Midtrans** (dokumentasi paling matang, komunitas Indonesia besar).
+
+### Biaya Transaksi (MDR QRIS)
+
+- **Reguler (UMI < 500rb):** 0.3%
+- **Reguler (UMI > 500rb):** 0.7%
+- **Merchant PSO/pendidikan/SPBU:** 0%
+
+Untuk order rata-rata Rp 100rb-200rb: fee QRIS Rp 300-1.400 per transaksi.
+
+**Keputusan:** MDR ditanggung platform (bukan tukang atau pelanggan) di fase pilot supaya tidak menambah friksi.
+
+## Kanal Rekrutmen Tukang
+
+1. **Kunjungan langsung** ke bengkel AC / toko material di Mojosari & Sooko
+2. **Grup WA "Tukang Mojokerto"** — cari admin, kenalan, tawarkan referral bonus
+3. **Facebook group** komunitas Mojokerto
+4. **Poster** di kelurahan & pasar tradisional
+5. **Referral tukang → tukang** — bonus Rp 25.000 per referral yang aktif
+
+## Kanal Akuisisi Pelanggan
+
+1. **Poster di perumahan besar** (Sooko, Puri)
+2. **Facebook ads** targeting Mojokerto radius 20 km
+3. **WA broadcast** ke database RT/RW (jika ada akses via kader)
+4. **Partnership dgn kos-kosan** industri Ngoro & Jetis
+5. **Voucher first order** Rp 20.000 potongan
+
+## KPI Khusus Pilot Mojokerto
+
+| KPI | Target Bulan 1 | Target Bulan 3 |
+|-----|----------------|----------------|
+| Tukang aktif | 20 | 60 |
+| Pelanggan terdaftar | 100 | 500 |
+| Order/hari | 3-5 | 20-30 |
+| Coverage kecamatan | 4 | 9 |
+| Order sukses (bayar QRIS) | ≥60% dari total order | ≥85% |
+| Waktu matching | <15 menit | <10 menit |
+

@@ -1,0 +1,260 @@
+// TukangNDeso database schema
+// Source of truth: docs/03-database-schema.md
+// PostGIS geography columns are modeled as Unsupported() because Prisma
+// has no native geography type. Spatial queries run via raw SQL in the
+// repository layer (see src/modules/*/repository.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  customer
+  worker
+  admin
+}
+
+enum WorkerStatus {
+  pending
+  active
+  suspended
+}
+
+enum PricingScheme {
+  hourly
+  daily
+}
+
+enum PaymentMethod {
+  qris
+  cash
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  refunded
+}
+
+enum WalletTransactionType {
+  credit
+  debit
+}
+
+model User {
+  id          String   @id @default(uuid())
+  phone       String   @unique @db.VarChar(15)
+  name        String   @db.VarChar(100)
+  email       String?  @db.VarChar(255)
+  avatarUrl   String?  @map("avatar_url")
+  role        UserRole
+  isVerified  Boolean  @default(false) @map("is_verified")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  addresses      Address[]
+  workerProfile  WorkerProfile?
+  ordersAsCustomer Order[] @relation("CustomerOrders")
+  ordersAsWorker   Order[] @relation("WorkerOrders")
+  reviewsGiven   Review[] @relation("CustomerReviews")
+  reviewsReceived Review[] @relation("WorkerReviews")
+
+  @@map("users")
+}
+
+model Address {
+  id           String  @id @default(uuid())
+  userId       String  @map("user_id")
+  label        String  @db.VarChar(50)
+  fullAddress  String  @map("full_address")
+  location     Unsupported("geography(Point, 4326)")
+  district     String  @db.VarChar(100)
+  city         String  @db.VarChar(100)
+  isDefault    Boolean @default(false) @map("is_default")
+
+  user   User    @relation(fields: [userId], references: [id])
+  orders Order[]
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+model WorkerProfile {
+  id            String       @id @default(uuid())
+  userId        String       @unique @map("user_id")
+  ktpNumber     String       @map("ktp_number") @db.VarChar(16)
+  ktpPhotoUrl   String       @map("ktp_photo_url")
+  bio           String?
+  workRadiusKm  Int          @default(20) @map("work_radius_km")
+  homeLocation  Unsupported("geography(Point, 4326)") @map("home_location")
+  isAvailable   Boolean      @default(true) @map("is_available")
+  ratingAvg     Decimal      @default(0) @map("rating_avg") @db.Decimal(2, 1)
+  totalOrders   Int          @default(0) @map("total_orders")
+  verifiedAt    DateTime?    @map("verified_at")
+  status        WorkerStatus @default(pending)
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  user   User          @relation(fields: [userId], references: [id])
+  skills WorkerSkill[]
+
+  @@map("worker_profiles")
+}
+
+model WorkerSkill {
+  id               String  @id @default(uuid())
+  workerId         String  @map("worker_id")
+  categoryCode     String  @map("category_code") @db.VarChar(10)
+  experienceYears  Int?    @map("experience_years")
+
+  worker   WorkerProfile    @relation(fields: [workerId], references: [id])
+  category ServiceCategory  @relation(fields: [categoryCode], references: [code])
+
+  @@index([categoryCode, workerId])
+  @@map("worker_skills")
+}
+
+model ServiceCategory {
+  code     String  @id @db.VarChar(10)
+  name     String  @db.VarChar(50)
+  iconUrl  String? @map("icon_url")
+  isActive Boolean @default(true) @map("is_active")
+
+  services Service[]
+  skills   WorkerSkill[]
+
+  @@map("service_categories")
+}
+
+model Service {
+  id             String  @id @default(uuid())
+  categoryCode   String  @map("category_code") @db.VarChar(10)
+  name           String  @db.VarChar(100)
+  description    String?
+  baseHourlyRate Int     @default(30000) @map("base_hourly_rate")
+  baseDailyRate  Int     @default(150000) @map("base_daily_rate")
+  minHours       Int     @default(2) @map("min_hours")
+  isActive       Boolean @default(true) @map("is_active")
+
+  category ServiceCategory @relation(fields: [categoryCode], references: [code])
+  orders   Order[]
+
+  @@map("services")
+}
+
+model Order {
+  id                 String         @id @default(uuid())
+  orderNumber        String         @unique @map("order_number") @db.VarChar(20)
+  customerId         String         @map("customer_id")
+  workerId           String?        @map("worker_id")
+  serviceId          String         @map("service_id")
+  status             String         @db.VarChar(20)
+  pricingScheme      PricingScheme  @map("pricing_scheme")
+  estimatedDuration  Int            @map("estimated_duration")
+  description        String?
+  photos             String[]
+  addressId          String         @map("address_id")
+  customerLocation   Unsupported("geography(Point, 4326)") @map("customer_location")
+  scheduledAt        DateTime?      @map("scheduled_at")
+  startedAt          DateTime?      @map("started_at")
+  completedAt        DateTime?      @map("completed_at")
+  createdAt          DateTime       @default(now()) @map("created_at")
+
+  customer User    @relation("CustomerOrders", fields: [customerId], references: [id])
+  worker   User?   @relation("WorkerOrders", fields: [workerId], references: [id])
+  service  Service @relation(fields: [serviceId], references: [id])
+  address  Address @relation(fields: [addressId], references: [id])
+
+  pricing  OrderPricing?
+  payments Payment[]
+  review   Review?
+
+  @@index([customerId, createdAt(sort: Desc)])
+  @@index([workerId, status])
+  @@index([status, createdAt])
+  @@map("orders")
+}
+
+model OrderPricing {
+  id                String   @id @default(uuid())
+  orderId           String   @unique @map("order_id")
+  baseRate          Int      @map("base_rate")
+  distanceKm         Decimal  @map("distance_km") @db.Decimal(5, 1)
+  travelCost         Int      @map("travel_cost")
+  surchargeHoliday   Int      @default(0) @map("surcharge_holiday")
+  surchargeNight     Int      @default(0) @map("surcharge_night")
+  surchargeWeekend   Int      @default(0) @map("surcharge_weekend")
+  surchargeUrgent    Int      @default(0) @map("surcharge_urgent")
+  surchargeFloor     Int      @default(0) @map("surcharge_floor")
+  totalEstimate      Int      @map("total_estimate")
+  totalFinal         Int?     @map("total_final")
+  actualDuration     Decimal? @map("actual_duration") @db.Decimal(4, 1)
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@map("order_pricing")
+}
+
+model Payment {
+  id        String        @id @default(uuid())
+  orderId   String        @map("order_id")
+  amount    Int
+  method    PaymentMethod
+  status    PaymentStatus @default(pending)
+  paidAt    DateTime?     @map("paid_at")
+  reference String?       @db.VarChar(100)
+  qrString  String?       @map("qr_string")
+  qrImageUrl String?      @map("qr_image_url")
+  expiresAt DateTime?     @map("expires_at")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@map("payments")
+}
+
+model Review {
+  id          String   @id @default(uuid())
+  orderId     String   @unique @map("order_id")
+  customerId  String   @map("customer_id")
+  workerId    String   @map("worker_id")
+  rating      Int
+  comment     String?
+  photos      String[]
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  order    Order @relation(fields: [orderId], references: [id])
+  customer User  @relation("CustomerReviews", fields: [customerId], references: [id])
+  worker   User  @relation("WorkerReviews", fields: [workerId], references: [id])
+
+  @@map("reviews")
+}
+
+model WorkerWallet {
+  id           String @id @default(uuid())
+  workerId     String @unique @map("worker_id")
+  balance      Int    @default(0)
+  totalEarned  Int    @default(0) @map("total_earned")
+
+  transactions WalletTransaction[]
+
+  @@map("worker_wallets")
+}
+
+model WalletTransaction {
+  id                String                 @id @default(uuid())
+  walletId          String                 @map("wallet_id")
+  type              WalletTransactionType
+  amount            Int
+  description       String                 @db.VarChar(200)
+  referenceOrderId  String?                @map("reference_order_id")
+  createdAt         DateTime               @default(now()) @map("created_at")
+
+  wallet WorkerWallet @relation(fields: [walletId], references: [id])
+
+  @@map("wallet_transactions")
+}
