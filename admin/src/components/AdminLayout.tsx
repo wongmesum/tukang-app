@@ -37,6 +37,16 @@ export function AdminLayout() {
               📈 Laporan
             </NavLink>
           </li>
+          <li>
+            <NavLink to="/seed-data" className={({ isActive }) => isActive ? 'active' : ''}>
+              🌱 Seed Data
+            </NavLink>
+          </li>
+          <li>
+            <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''}>
+              ⚙️ Pengaturan
+            </NavLink>
+          </li>
         </ul>
         <div style={{ padding: '16px 24px' }}>
           <button className="btn btn-outline" style={{ width: '100%', color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}

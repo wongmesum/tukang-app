@@ -3,8 +3,10 @@ import { adminMiddleware } from "../../shared/admin-middleware";
 import { workerRepo } from "../workers/repository";
 import { orderRepo } from "../orders/repository";
 import { paymentRepo } from "../payments/repository";
+import { serviceRepo } from "../services/repository";
 import { transitionOrder } from "../orders/state-machine";
 import type { OrderStatus } from "../orders/state-machine";
+import { randomUUID } from "node:crypto";
 
 import { paginate, parsePagination } from "../../shared/pagination";
 
@@ -315,6 +317,235 @@ adminRouter.get("/reports/summary", async (context) => {
       },
     },
   });
+});
+
+// --- Categories CRUD ---
+
+// GET /admin/categories (all, including inactive)
+adminRouter.get("/categories", async (context) => {
+  const categories = await serviceRepo.findAllCategories();
+  return context.json({
+    success: true,
+    data: categories.map((c) => ({
+      code: c.code,
+      name: c.name,
+      icon_url: c.iconUrl,
+      is_active: c.isActive,
+    })),
+  });
+});
+
+// POST /admin/categories
+adminRouter.post("/categories", async (context) => {
+  const body = await context.req.json() as {
+    code?: string;
+    name?: string;
+    icon_url?: string;
+    is_active?: boolean;
+  };
+
+  if (!body.code || !body.name) {
+    return context.json(
+      { success: false, error: { code: "VALIDATION_ERROR", message: "code dan name wajib diisi" } },
+      400,
+    );
+  }
+
+  const code = body.code.toUpperCase().slice(0, 10);
+
+  try {
+    const category = await serviceRepo.createCategory({
+      code,
+      name: body.name,
+      iconUrl: body.icon_url ?? null,
+      isActive: body.is_active ?? true,
+    });
+
+    return context.json({
+      success: true,
+      data: { code: category.code, name: category.name, icon_url: category.iconUrl, is_active: category.isActive },
+    });
+  } catch (err) {
+    return context.json(
+      { success: false, error: { code: "CONFLICT", message: `Kategori ${code} sudah ada` } },
+      409,
+    );
+  }
+});
+
+// PATCH /admin/categories/:code
+adminRouter.patch("/categories/:code", async (context) => {
+  const code = context.req.param("code")?.toUpperCase();
+  const body = await context.req.json() as {
+    name?: string;
+    icon_url?: string;
+    is_active?: boolean;
+  };
+
+  const updated = await serviceRepo.updateCategory(code, {
+    name: body.name,
+    iconUrl: body.icon_url,
+    isActive: body.is_active,
+  });
+
+  if (!updated) {
+    return context.json(
+      { success: false, error: { code: "NOT_FOUND", message: "Kategori tidak ditemukan" } },
+      404,
+    );
+  }
+
+  return context.json({
+    success: true,
+    data: { code: updated.code, name: updated.name, icon_url: updated.iconUrl, is_active: updated.isActive },
+  });
+});
+
+// DELETE /admin/categories/:code
+adminRouter.delete("/categories/:code", async (context) => {
+  const code = context.req.param("code")?.toUpperCase();
+  const deleted = await serviceRepo.deleteCategory(code);
+
+  if (!deleted) {
+    return context.json(
+      { success: false, error: { code: "NOT_FOUND", message: "Kategori tidak ditemukan" } },
+      404,
+    );
+  }
+
+  return context.json({ success: true, data: { message: `Kategori ${code} berhasil dihapus` } });
+});
+
+// --- Services CRUD ---
+
+// GET /admin/services (all services, all categories)
+adminRouter.get("/services", async (context) => {
+  const services = await serviceRepo.findAllServices();
+  return context.json({
+    success: true,
+    data: services.map((s) => ({
+      id: s.id,
+      category_code: s.categoryCode,
+      name: s.name,
+      description: s.description,
+      base_hourly_rate: s.baseHourlyRate,
+      base_daily_rate: s.baseDailyRate,
+      min_hours: s.minHours,
+      is_active: s.isActive,
+    })),
+  });
+});
+
+// POST /admin/services
+adminRouter.post("/services", async (context) => {
+  const body = await context.req.json() as {
+    category_code?: string;
+    name?: string;
+    description?: string;
+    base_hourly_rate?: number;
+    base_daily_rate?: number;
+    min_hours?: number;
+    is_active?: boolean;
+  };
+
+  if (!body.category_code || !body.name) {
+    return context.json(
+      { success: false, error: { code: "VALIDATION_ERROR", message: "category_code dan name wajib diisi" } },
+      400,
+    );
+  }
+
+  // Verify category exists
+  const category = await serviceRepo.findCategoryByCode(body.category_code.toUpperCase());
+  if (!category) {
+    return context.json(
+      { success: false, error: { code: "NOT_FOUND", message: "Kategori tidak ditemukan" } },
+      404,
+    );
+  }
+
+  const service = await serviceRepo.createService({
+    id: randomUUID(),
+    categoryCode: body.category_code.toUpperCase(),
+    name: body.name,
+    description: body.description ?? null,
+    baseHourlyRate: body.base_hourly_rate ?? 30000,
+    baseDailyRate: body.base_daily_rate ?? 150000,
+    minHours: body.min_hours ?? 2,
+    isActive: body.is_active ?? true,
+  });
+
+  return context.json({
+    success: true,
+    data: {
+      id: service.id,
+      category_code: service.categoryCode,
+      name: service.name,
+      description: service.description,
+      base_hourly_rate: service.baseHourlyRate,
+      base_daily_rate: service.baseDailyRate,
+      min_hours: service.minHours,
+      is_active: service.isActive,
+    },
+  });
+});
+
+// PATCH /admin/services/:id
+adminRouter.patch("/services/:id", async (context) => {
+  const id = context.req.param("id");
+  const body = await context.req.json() as {
+    name?: string;
+    description?: string;
+    base_hourly_rate?: number;
+    base_daily_rate?: number;
+    min_hours?: number;
+    is_active?: boolean;
+  };
+
+  const updated = await serviceRepo.updateService(id, {
+    name: body.name,
+    description: body.description,
+    baseHourlyRate: body.base_hourly_rate,
+    baseDailyRate: body.base_daily_rate,
+    minHours: body.min_hours,
+    isActive: body.is_active,
+  });
+
+  if (!updated) {
+    return context.json(
+      { success: false, error: { code: "NOT_FOUND", message: "Layanan tidak ditemukan" } },
+      404,
+    );
+  }
+
+  return context.json({
+    success: true,
+    data: {
+      id: updated.id,
+      category_code: updated.categoryCode,
+      name: updated.name,
+      description: updated.description,
+      base_hourly_rate: updated.baseHourlyRate,
+      base_daily_rate: updated.baseDailyRate,
+      min_hours: updated.minHours,
+      is_active: updated.isActive,
+    },
+  });
+});
+
+// DELETE /admin/services/:id
+adminRouter.delete("/services/:id", async (context) => {
+  const id = context.req.param("id");
+  const deleted = await serviceRepo.deleteService(id);
+
+  if (!deleted) {
+    return context.json(
+      { success: false, error: { code: "NOT_FOUND", message: "Layanan tidak ditemukan" } },
+      404,
+    );
+  }
+
+  return context.json({ success: true, data: { message: "Layanan berhasil dihapus" } });
 });
 
 export { adminRouter };

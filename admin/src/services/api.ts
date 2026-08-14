@@ -89,3 +89,52 @@ export function resolveDispute(orderId: string, resolution: string, refund: bool
 export function fetchReportSummary() {
   return request<any>('/reports/summary');
 }
+
+// --- Categories (Admin CRUD) ---
+export function fetchAdminCategories() {
+  return request<any[]>('/categories');
+}
+
+export function createCategory(data: { code: string; name: string; icon_url?: string; is_active?: boolean }) {
+  return request('/categories', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateCategory(code: string, data: { name?: string; icon_url?: string; is_active?: boolean }) {
+  return request(`/categories/${code}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export function deleteCategory(code: string) {
+  return request(`/categories/${code}`, { method: 'DELETE' });
+}
+
+// --- Services (Admin CRUD) ---
+export function fetchAdminServices() {
+  return request<any[]>('/services');
+}
+
+export function createService(data: {
+  category_code: string;
+  name: string;
+  description?: string;
+  base_hourly_rate?: number;
+  base_daily_rate?: number;
+  min_hours?: number;
+  is_active?: boolean;
+}) {
+  return request('/services', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateService(id: string, data: {
+  name?: string;
+  description?: string;
+  base_hourly_rate?: number;
+  base_daily_rate?: number;
+  min_hours?: number;
+  is_active?: boolean;
+}) {
+  return request(`/services/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export function deleteService(id: string) {
+  return request(`/services/${id}`, { method: 'DELETE' });
+}

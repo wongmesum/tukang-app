@@ -8,6 +8,8 @@ import { WorkersPage } from './pages/WorkersPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { DisputesPage } from './pages/DisputesPage';
 import { ReportsPage } from './pages/ReportsPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { SeedDataPage } from './pages/SeedDataPage';
 import './styles.css';
 
 function App() {
@@ -22,6 +24,8 @@ function App() {
           <Route path="orders" element={<OrdersPage />} />
           <Route path="disputes" element={<DisputesPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="seed-data" element={<SeedDataPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
