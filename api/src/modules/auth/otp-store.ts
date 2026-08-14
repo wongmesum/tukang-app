@@ -1,4 +1,6 @@
 import type { StoredOtpRecord } from "./otp";
+import { env } from "../../config/env";
+import { RedisOtpStore } from "./redis-otp-store";
 
 export interface OtpStore {
   get(phone: string): Promise<StoredOtpRecord | null>;
@@ -8,10 +10,9 @@ export interface OtpStore {
 
 const CLEANUP_INTERVAL_MS = 60_000;
 
-// In-memory OTP store used for tests and single-instance development.
-// For multi-instance production deployments, implement OtpStore against
-// Redis (already provisioned in docker-compose.yml) so OTP state survives
-// restarts and is shared across instances.
+/**
+ * In-memory OTP store — used for tests and single-instance development.
+ */
 export class InMemoryOtpStore implements OtpStore {
   private readonly records = new Map<string, StoredOtpRecord>();
   private lastCleanup = Date.now();
@@ -42,4 +43,17 @@ export class InMemoryOtpStore implements OtpStore {
   }
 }
 
-export const otpStore: OtpStore = new InMemoryOtpStore();
+/**
+ * Factory: uses Redis in production/when REDIS_URL is set, in-memory otherwise.
+ */
+function createOtpStore(): OtpStore {
+  if (env.NODE_ENV === "test") {
+    return new InMemoryOtpStore();
+  }
+  if (env.REDIS_URL) {
+    return new RedisOtpStore();
+  }
+  return new InMemoryOtpStore();
+}
+
+export const otpStore: OtpStore = createOtpStore();
