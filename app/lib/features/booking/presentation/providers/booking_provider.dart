@@ -18,6 +18,8 @@ class BookingState {
     this.isLoading = false,
     this.errorMessage,
     this.createdOrderId,
+    this.matchedWorkerId,
+    this.noWorkerAvailable = false,
   });
 
   final String? serviceId;
@@ -35,6 +37,12 @@ class BookingState {
   final String? errorMessage;
   final String? createdOrderId;
 
+  /// Set when the server matched a worker during order creation.
+  final String? matchedWorkerId;
+
+  /// True when no eligible worker was available in range.
+  final bool noWorkerAvailable;
+
   BookingState copyWith({
     String? serviceId,
     String? pricingScheme,
@@ -50,6 +58,8 @@ class BookingState {
     bool? isLoading,
     String? errorMessage,
     String? createdOrderId,
+    String? matchedWorkerId,
+    bool? noWorkerAvailable,
   }) {
     return BookingState(
       serviceId: serviceId ?? this.serviceId,
@@ -66,6 +76,8 @@ class BookingState {
       isLoading: isLoading ?? this.isLoading,
       errorMessage: errorMessage,
       createdOrderId: createdOrderId ?? this.createdOrderId,
+      matchedWorkerId: matchedWorkerId ?? this.matchedWorkerId,
+      noWorkerAvailable: noWorkerAvailable ?? this.noWorkerAvailable,
     );
   }
 }
@@ -148,8 +160,20 @@ class BookingNotifier extends StateNotifier<BookingState> {
     ));
 
     if (response.success && response.data != null) {
-      final orderId = response.data!['id'] as String?;
-      state = state.copyWith(isLoading: false, createdOrderId: orderId);
+      final data = response.data!;
+      final orderId = data['id'] as String?;
+
+      // The server runs matching during creation and reports the outcome,
+      // so the app doesn't need to poll to find out if a worker was found.
+      final matching = data['matching'] as Map<String, dynamic>?;
+      final matched = matching?['matched'] == true;
+
+      state = state.copyWith(
+        isLoading: false,
+        createdOrderId: orderId,
+        matchedWorkerId: matched ? matching?['worker_id'] as String? : null,
+        noWorkerAvailable: !matched,
+      );
       return true;
     } else {
       state = state.copyWith(

@@ -34,6 +34,10 @@ export interface UpdateWorkerProfileInput {
   skills?: string[];
   isAvailable?: boolean;
   status?: WorkerStatus;
+  /** Recomputed from all reviews — not set directly by the worker. */
+  ratingAvg?: number;
+  /** Incremented when an order completes. */
+  totalOrders?: number;
 }
 
 export interface WorkerProfileRepository {

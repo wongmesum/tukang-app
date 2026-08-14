@@ -4,7 +4,9 @@ import { requireRole } from "../../shared/role-middleware";
 import { orderRepo } from "./repository";
 import { cancelOrderSchema, createOrderSchema, rejectOrderSchema } from "./schema";
 import { transitionOrder } from "./state-machine";
-import { emitOrderStatusChanged } from "../realtime/events";
+import { notifyOrderTransition } from "./events";
+import { tryAutoMatch } from "../matching/service";
+import { workerRepo } from "../workers/repository";
 import type { OrderRecord } from "./types";
 
 function formatOrder(order: OrderRecord) {
@@ -96,7 +98,25 @@ ordersRouter.post("/orders", requireRole("customer"), async (context) => {
     },
   });
 
-  return context.json({ success: true, data: formatOrder(order) });
+  // Immediately look for a nearby worker. A booking must still succeed when
+  // nobody is available, so the order stays PENDING and the response tells
+  // the app whether to show "searching" or "no worker available".
+  const matchResult = await tryAutoMatch(order);
+  const finalOrder = matchResult.ok ? matchResult.order : order;
+
+  return context.json({
+    success: true,
+    data: {
+      ...formatOrder(finalOrder),
+      matching: matchResult.ok
+        ? {
+            matched: true,
+            worker_id: matchResult.workerId,
+            distance_km: matchResult.candidate.distanceKm,
+          }
+        : { matched: false, reason: matchResult.reason },
+    },
+  });
 });
 
 import { paginate, parsePagination } from "../../shared/pagination";
@@ -173,7 +193,7 @@ ordersRouter.post("/orders/:id/cancel", async (context) => {
   try {
     const nextStatus = transitionOrder(order.status, "CANCELLED_BY_CUSTOMER");
     const updated = await orderRepo.update(id, { status: nextStatus });
-    emitOrderStatusChanged({
+    notifyOrderTransition({
       orderId: updated.id,
       orderNumber: updated.orderNumber,
       status: nextStatus,
@@ -272,7 +292,7 @@ ordersRouter.post("/worker/orders/:id/accept", requireRole("worker"), async (con
       status: nextStatus,
       workerId: authUser.userId,
     });
-    emitOrderStatusChanged({
+    notifyOrderTransition({
       orderId: updated.id,
       orderNumber: updated.orderNumber,
       status: nextStatus,
@@ -339,14 +359,26 @@ ordersRouter.post("/worker/orders/:id/reject", requireRole("worker"), async (con
     );
   }
 
-  // Re-queue: drop the assignment and send it back to PENDING so matching
-  // can offer it to another worker.
-  const updated = await orderRepo.update(id, {
+  // Re-queue: drop the assignment and send it back to PENDING.
+  const requeued = await orderRepo.update(id, {
     status: "PENDING",
     workerId: null,
   });
 
-  return context.json({ success: true, data: formatOrder(updated) });
+  // Immediately offer it to the next-best worker, excluding the one who just
+  // rejected — otherwise matching would hand it straight back to them.
+  const rematch = await tryAutoMatch(requeued, [authUser.userId]);
+  const finalOrder = rematch.ok ? rematch.order : requeued;
+
+  return context.json({
+    success: true,
+    data: {
+      ...formatOrder(finalOrder),
+      matching: rematch.ok
+        ? { matched: true, worker_id: rematch.workerId }
+        : { matched: false, reason: rematch.reason },
+    },
+  });
 });
 
 // POST /worker/orders/:id/enroute
@@ -371,7 +403,7 @@ ordersRouter.post("/worker/orders/:id/enroute", requireRole("worker"), async (co
   try {
     const nextStatus = transitionOrder(order.status, "EN_ROUTE");
     const updated = await orderRepo.update(id, { status: nextStatus });
-    emitOrderStatusChanged({
+    notifyOrderTransition({
       orderId: updated.id,
       orderNumber: updated.orderNumber,
       status: nextStatus,
@@ -415,7 +447,7 @@ ordersRouter.post("/worker/orders/:id/arrive", requireRole("worker"), async (con
   try {
     const nextStatus = transitionOrder(order.status, "ARRIVED");
     const updated = await orderRepo.update(id, { status: nextStatus });
-    emitOrderStatusChanged({
+    notifyOrderTransition({
       orderId: updated.id,
       orderNumber: updated.orderNumber,
       status: nextStatus,
@@ -462,7 +494,7 @@ ordersRouter.post("/worker/orders/:id/start", requireRole("worker"), async (cont
       status: nextStatus,
       startedAt: new Date(),
     });
-    emitOrderStatusChanged({
+    notifyOrderTransition({
       orderId: updated.id,
       orderNumber: updated.orderNumber,
       status: nextStatus,
@@ -514,13 +546,18 @@ ordersRouter.post("/worker/orders/:id/complete", requireRole("worker"), async (c
         totalFinal: order.pricing.totalEstimate,
       },
     });
-    emitOrderStatusChanged({
+    notifyOrderTransition({
       orderId: updated.id,
       orderNumber: updated.orderNumber,
       status: nextStatus,
       customerId: updated.customerId,
       workerId: updated.workerId,
     });
+
+    // Credit the completed job to the worker's counter — matching ranks
+    // candidates partly by experience, so this must stay current.
+    await incrementWorkerOrderCount(authUser.userId);
+
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(
@@ -535,5 +572,21 @@ ordersRouter.post("/worker/orders/:id/complete", requireRole("worker"), async (c
     );
   }
 });
+
+/**
+ * Bump a worker's completed-order counter.
+ *
+ * Best-effort: the order is already COMPLETED, so a counter failure must not
+ * turn a successful completion into an error response.
+ */
+async function incrementWorkerOrderCount(workerId: string): Promise<void> {
+  try {
+    const profile = await workerRepo.findByUserId(workerId);
+    if (!profile) return;
+    await workerRepo.update(workerId, { totalOrders: profile.totalOrders + 1 });
+  } catch {
+    // Ignore — counter drift is acceptable, a failed completion is not.
+  }
+}
 
 export { ordersRouter };

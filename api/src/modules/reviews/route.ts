@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { authMiddleware } from "../../shared/auth-middleware";
 import { orderRepo } from "../orders/repository";
 import { transitionOrder } from "../orders/state-machine";
+import { workerRepo } from "../workers/repository";
 import { reviewRepo } from "./repository";
 import { createReviewSchema } from "./schema";
 import type { ReviewRecord } from "./types";
@@ -105,8 +106,33 @@ reviewsRouter.post("/orders/:id/review", async (context) => {
   const nextStatus = transitionOrder(order.status, "REVIEWED");
   await orderRepo.update(orderId, { status: nextStatus });
 
+  // Recompute the worker's rating from all their reviews. Without this the
+  // profile rating stays at 0 forever and matching can't rank by quality.
+  await recalculateWorkerRating(order.workerId);
+
   return context.json({ success: true, data: formatReview(review) });
 });
+
+/**
+ * Recompute a worker's average rating from every review they've received.
+ *
+ * Averaging the full set (rather than incrementally adjusting) keeps the
+ * value correct even if a review is later edited or removed.
+ */
+async function recalculateWorkerRating(workerId: string): Promise<void> {
+  try {
+    const reviews = await reviewRepo.findByWorkerId(workerId);
+    if (reviews.length === 0) return;
+
+    const sum = reviews.reduce((total, r) => total + r.rating, 0);
+    const average = Math.round((sum / reviews.length) * 10) / 10;
+
+    await workerRepo.update(workerId, { ratingAvg: average });
+  } catch {
+    // A rating refresh failure must not fail the review submission —
+    // the review itself is already persisted.
+  }
+}
 
 // GET /orders/:id/review
 reviewsRouter.get("/orders/:id/review", async (context) => {

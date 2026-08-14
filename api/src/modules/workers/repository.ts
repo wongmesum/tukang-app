@@ -61,6 +61,8 @@ export class InMemoryWorkerProfileRepository implements WorkerProfileRepository 
       ...(patch.skills !== undefined && { skills: [...patch.skills] }),
       ...(patch.isAvailable !== undefined && { isAvailable: patch.isAvailable }),
       ...(patch.status !== undefined && { status: patch.status }),
+      ...(patch.ratingAvg !== undefined && { ratingAvg: patch.ratingAvg }),
+      ...(patch.totalOrders !== undefined && { totalOrders: patch.totalOrders }),
     };
     workers.set(userId, updated);
     return updated;

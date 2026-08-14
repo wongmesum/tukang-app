@@ -6,7 +6,7 @@ import { env } from "../../config/env";
 import { paymentRepo } from "./repository";
 import { orderRepo } from "../orders/repository";
 import { transitionOrder } from "../orders/state-machine";
-import { emitOrderStatusChanged } from "../realtime/events";
+import { notifyOrderTransition } from "../orders/events";
 import { walletRepo } from "../workers/repository";
 import { createQrisCharge, verifyMidtransSignature, parseMidtransStatus } from "./midtrans";
 
@@ -206,7 +206,7 @@ paymentsRouter.post("/payments/webhook/qris", async (context) => {
       const nextStatus = transitionOrder(order.status, "PAID");
       await orderRepo.update(order.id, { status: nextStatus });
       await creditWorkerOnPayment(order.id);
-      emitOrderStatusChanged({
+      notifyOrderTransition({
         orderId: order.id,
         orderNumber: order.orderNumber,
         status: nextStatus,
@@ -260,7 +260,7 @@ paymentsRouter.post("/payments/simulate-paid", authMiddleware, async (context) =
     const nextStatus = transitionOrder(order.status, "PAID");
     await orderRepo.update(order.id, { status: nextStatus });
     await creditWorkerOnPayment(order.id);
-    emitOrderStatusChanged({
+    notifyOrderTransition({
       orderId: order.id,
       orderNumber: order.orderNumber,
       status: nextStatus,

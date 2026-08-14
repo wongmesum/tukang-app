@@ -72,11 +72,42 @@ describe("Order Lifecycle E2E", () => {
 
     expect(res.status).toBe(200);
     expect(res.json.success).toBe(true);
-    expect(res.json.data.status).toBe("PENDING");
     expect(res.json.data.order_number).toMatch(/^ORD-/);
     expect(res.json.data.pricing.total_estimate).toBe(98000);
 
+    // Auto-matching runs during creation. The seed has AC-skilled workers
+    // near the customer, so the order should already be assigned.
+    expect(res.json.data.matching.matched).toBe(true);
+    expect(res.json.data.status).toBe("MATCHED");
+    expect(res.json.data.worker_id).toBe(workerId);
+
     orderId = res.json.data.id;
+  });
+
+  it("Auto-matching picks the nearest eligible worker", async () => {
+    // Customer sits closest to worker 1 (Mojosari). Worker 3 handles PLB/LAS
+    // only, so an AC order must never land on them.
+    const res = await req("POST", "/v1/orders", {
+      service_id: "seed-AC-isi-freon-ac",
+      pricing_scheme: "hourly",
+      estimated_duration: 2,
+      description: "Cek matching terdekat",
+      photos: [],
+      address_id: "test-address-3",
+      customer_location: { lat: -7.4722, lng: 112.4336 },
+      scheduled_at: null,
+      pricing: {
+        base_rate: 60000,
+        distance_km: 1,
+        travel_cost: 5000,
+        surcharge: { holiday: 0, night: 0, weekend: 0, urgent: 0, floor: 0 },
+        total_estimate: 65000,
+      },
+    }, customerToken);
+
+    expect(res.json.data.matching.matched).toBe(true);
+    expect(res.json.data.matching.distance_km).toBeLessThan(5);
+    expect(res.json.data.worker_id).toBe(workerId);
   });
 
   // 2. Worker accepts order
@@ -181,9 +212,27 @@ describe("Order Lifecycle E2E", () => {
       comment: "Tukangnya ramah dan cepat. AC kembali dingin!",
     }, customerToken);
 
-    // Review endpoint may return 200 or transition the order
     expect(res.status).toBe(200);
     expect(res.json.success).toBe(true);
+    expect(res.json.data.rating).toBe(5);
+  });
+
+  // 8b. The review must propagate to the worker's profile rating
+  it("Worker rating is recalculated after review", async () => {
+    const res = await req("GET", "/v1/worker/profile", undefined, workerToken);
+
+    expect(res.status).toBe(200);
+    // Seeded workers start at 0; a 5-star review must lift the average.
+    expect(res.json.data.rating_avg).toBeGreaterThan(0);
+    expect(res.json.data.rating_avg).toBeLessThanOrEqual(5);
+  });
+
+  // 8c. Completing the order must bump the worker's experience counter
+  it("Worker total_orders incremented after completion", async () => {
+    const res = await req("GET", "/v1/worker/profile", undefined, workerToken);
+
+    expect(res.status).toBe(200);
+    expect(res.json.data.total_orders).toBeGreaterThan(0);
   });
 
   // --- Error cases ---
@@ -245,6 +294,61 @@ describe("Order Cancellation", () => {
     }, customerToken);
 
     expect(res.status).toBe(409);
+  });
+});
+
+describe("Worker Rejection & Re-matching", () => {
+  it("Rejected order is re-offered to a different worker", async () => {
+    const seedRes = await req("POST", "/dev/seed/demo");
+    const custToken = seedRes.json.data.customers[0].token;
+
+    // Create an order — auto-matching assigns the nearest AC worker
+    const createRes = await req("POST", "/v1/orders", {
+      service_id: "seed-AC-perbaikan-ac",
+      pricing_scheme: "hourly",
+      estimated_duration: 2,
+      description: "Test reject flow",
+      photos: [],
+      address_id: "test-address-4",
+      customer_location: { lat: -7.47, lng: 112.43 },
+      scheduled_at: null,
+      pricing: {
+        base_rate: 60000,
+        distance_km: 5,
+        travel_cost: 5000,
+        surcharge: { holiday: 0, night: 0, weekend: 0, urgent: 0, floor: 0 },
+        total_estimate: 65000,
+      },
+    }, custToken);
+
+    const rejectOrderId = createRes.json.data.id;
+    const assignedWorkerId = createRes.json.data.worker_id;
+    expect(assignedWorkerId).toBeTruthy();
+
+    // Find the token belonging to the assigned worker
+    const assignedWorker = seedRes.json.data.workers.find(
+      (w: { id: string }) => w.id === assignedWorkerId,
+    );
+    expect(assignedWorker).toBeTruthy();
+
+    // That worker rejects it
+    const rejectRes = await req(
+      "POST",
+      `/v1/worker/orders/${rejectOrderId}/reject`,
+      { reason: "Sedang ada pekerjaan lain" },
+      assignedWorker.token,
+    );
+
+    expect(rejectRes.status).toBe(200);
+
+    // It must not bounce straight back to the same worker
+    if (rejectRes.json.data.matching.matched) {
+      expect(rejectRes.json.data.worker_id).not.toBe(assignedWorkerId);
+    } else {
+      // No other AC worker in range — order waits as PENDING
+      expect(rejectRes.json.data.status).toBe("PENDING");
+      expect(rejectRes.json.data.worker_id).toBeNull();
+    }
   });
 });
 
