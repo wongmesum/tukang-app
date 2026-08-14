@@ -5,6 +5,7 @@ import 'package:tukangndeso/core/config/router.dart';
 import 'package:tukangndeso/core/theme/app_colors.dart';
 import 'package:tukangndeso/core/theme/app_spacing.dart';
 import 'package:tukangndeso/core/theme/app_typography.dart';
+import 'package:tukangndeso/core/widgets/location_picker.dart';
 import 'package:tukangndeso/features/booking/presentation/providers/booking_provider.dart';
 
 class BookingFormScreen extends ConsumerStatefulWidget {
@@ -23,6 +24,7 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
   int _floorLevel = 1;
   bool _isUrgent = false;
   DateTime? _scheduledAt;
+  LocationResult? _selectedLocation;
 
   @override
   void dispose() {
@@ -31,6 +33,13 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
   }
 
   void _requestEstimate() {
+    if (_selectedLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pilih lokasi terlebih dahulu')),
+      );
+      return;
+    }
+
     ref.read(bookingProvider.notifier).setBookingParams(
           serviceId: widget.serviceId,
           pricingScheme: _pricingScheme,
@@ -42,6 +51,11 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
           isUrgent: _isUrgent,
           scheduledAt: _scheduledAt?.toIso8601String(),
         );
+    // Set location to booking state
+    ref.read(bookingProvider.notifier).setAddress(
+      'default', // TODO: use actual addressId from address picker
+      {'lat': _selectedLocation!.lat, 'lng': _selectedLocation!.lng},
+    );
     context.push(Routes.priceEstimate);
   }
 
@@ -218,6 +232,17 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
                     ? '${_scheduledAt!.day}/${_scheduledAt!.month}/${_scheduledAt!.year} ${_scheduledAt!.hour}:${_scheduledAt!.minute.toString().padLeft(2, '0')}'
                     : 'Sekarang (segera)',
               ),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            // Location Picker
+            LocationPicker(
+              initialLocation: _selectedLocation,
+              onLocationSelected: (location) {
+                setState(() => _selectedLocation = location);
+              },
+              label: 'Lokasi Pekerjaan',
             ),
 
             const SizedBox(height: AppSpacing.xl),

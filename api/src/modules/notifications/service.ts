@@ -1,9 +1,14 @@
 import type { NotificationPayload } from "./types";
 import { deviceTokenRepo } from "./repository";
+import { sendFcmMessage } from "./firebase";
 
 /**
- * Notification service — sends push notifications via FCM.
- * In MVP: log to console. Production: call Firebase Admin SDK.
+ * Notification service — sends push notifications via Firebase Cloud Messaging.
+ *
+ * Features:
+ * - Sends to all registered devices of a user
+ * - Auto-removes invalid/unregistered tokens
+ * - Graceful fallback when Firebase is not configured (logs to console)
  */
 export interface NotificationService {
   sendToUser(userId: string, payload: NotificationPayload): Promise<void>;
@@ -15,33 +20,38 @@ class FcmNotificationService implements NotificationService {
     const tokens = await deviceTokenRepo.findByUserId(userId);
 
     if (tokens.length === 0) {
-      // No device token registered — skip silently
       return;
     }
 
-    for (const deviceToken of tokens) {
-      await this._sendToDevice(deviceToken.token, payload);
+    const tokensToRemove: string[] = [];
+
+    await Promise.allSettled(
+      tokens.map(async (deviceToken) => {
+        const result = await sendFcmMessage({
+          token: deviceToken.token,
+          notification: { title: payload.title, body: payload.body },
+          data: payload.data,
+          android: {
+            priority: "high",
+            notification: { channel_id: "tukangndeso_orders", sound: "default" },
+          },
+        });
+
+        // Clean up invalid tokens
+        if (!result.success && result.shouldRemoveToken) {
+          tokensToRemove.push(deviceToken.token);
+        }
+      }),
+    );
+
+    // Remove invalid tokens
+    for (const token of tokensToRemove) {
+      await deviceTokenRepo.unregister(userId, token);
     }
   }
 
   async sendToMultiple(userIds: string[], payload: NotificationPayload): Promise<void> {
-    await Promise.all(userIds.map((id) => this.sendToUser(id, payload)));
-  }
-
-  private async _sendToDevice(deviceToken: string, payload: NotificationPayload): Promise<void> {
-    // TODO: Replace with Firebase Admin SDK in production
-    // import admin from 'firebase-admin';
-    // await admin.messaging().send({
-    //   token: deviceToken,
-    //   notification: { title: payload.title, body: payload.body },
-    //   data: payload.data,
-    // });
-
-    // MVP: log only (never log token in production)
-    if (process.env.NODE_ENV !== "production") {
-      // eslint-disable-next-line no-console
-      console.log(`[PUSH] → ${deviceToken.slice(0, 8)}... | ${payload.type} | ${payload.title}`);
-    }
+    await Promise.allSettled(userIds.map((id) => this.sendToUser(id, payload)));
   }
 }
 

@@ -38,6 +38,16 @@ const envSchema = z.object({
   CORS_ORIGINS: z.string().default("http://localhost:3000,http://localhost:5173"),
 
   QRIS_WEBHOOK_SECRET: z.string().min(1).optional(),
+
+  // Firebase Admin SDK
+  FIREBASE_PROJECT_ID: z.string().optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().optional(),
+  FIREBASE_PRIVATE_KEY: z.string().optional(),
+
+  // Midtrans QRIS
+  MIDTRANS_SERVER_KEY: z.string().optional(),
+  MIDTRANS_CLIENT_KEY: z.string().optional(),
+  MIDTRANS_IS_PRODUCTION: z.coerce.boolean().default(false),
 });
 
 export type Env = z.infer<typeof envSchema>;
