@@ -14,6 +14,8 @@ export interface OrderPricingSnapshot {
   totalEstimate: number;
   totalFinal: number | null;
   actualDuration: number | null;
+  /** Charged when the customer cancels after the worker departed. */
+  cancellationFee: number | null;
 }
 
 export interface OrderRecord {
@@ -30,6 +32,8 @@ export interface OrderRecord {
   addressId: string;
   customerLocation: { lat: number; lng: number };
   scheduledAt: Date | null;
+  /** When a worker was assigned. Drives the accept-timeout countdown. */
+  matchedAt: Date | null;
   startedAt: Date | null;
   completedAt: Date | null;
   createdAt: Date;
@@ -57,4 +61,6 @@ export interface OrderRepository {
   findActive(workerId: string): Promise<OrderRecord[]>;
   findHistory(workerId: string): Promise<OrderRecord[]>;
   update(id: string, patch: Partial<OrderRecord>): Promise<OrderRecord>;
+  /** Used by the timeout sweeper to find stale orders. */
+  findByStatuses(statuses: OrderStatus[]): Promise<OrderRecord[]>;
 }

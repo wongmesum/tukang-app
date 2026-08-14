@@ -6,7 +6,9 @@ import { env } from "../../config/env";
 import { paymentRepo } from "./repository";
 import { orderRepo } from "../orders/repository";
 import { transitionOrder } from "../orders/state-machine";
+import { notifyOrderTransition } from "../orders/events";
 import { walletRepo } from "../workers/repository";
+import { createQrisCharge, verifyMidtransSignature, parseMidtransStatus } from "./midtrans";
 
 async function creditWorkerOnPayment(orderId: string) {
   const order = await orderRepo.findById(orderId);
@@ -94,15 +96,30 @@ paymentsRouter.post("/payments/qris/create", authMiddleware, async (context) => 
     orderId: order.id,
     amount: order.pricing.totalFinal ?? order.pricing.totalEstimate,
     method: "qris",
-    qrString: null, // filled below
+    qrString: null,
     qrImageUrl: null,
     expiresAt,
   });
 
-  // Generate QR after we have payment id
-  const qrString = generateQrString(payment.id, payment.amount);
-  const qrImageUrl = generateQrImageUrl(payment.id);
-  const updated = await paymentRepo.markQrData(payment.id, qrString, qrImageUrl);
+  // Generate QRIS via Midtrans (or stub in dev)
+  const qrisResult = await createQrisCharge({
+    orderId: payment.id,
+    amount: payment.amount,
+    expiryMinutes: QRIS_EXPIRY_MINUTES,
+  });
+
+  if (!qrisResult.success) {
+    return context.json(
+      { success: false, error: { code: "PAYMENT_ERROR", message: qrisResult.error ?? "Gagal membuat QRIS" } },
+      500,
+    );
+  }
+
+  const updated = await paymentRepo.markQrData(
+    payment.id,
+    qrisResult.qrString ?? null,
+    qrisResult.qrImageUrl ?? null,
+  );
 
   return context.json({ success: true, data: formatPayment(updated) });
 });
@@ -189,6 +206,13 @@ paymentsRouter.post("/payments/webhook/qris", async (context) => {
       const nextStatus = transitionOrder(order.status, "PAID");
       await orderRepo.update(order.id, { status: nextStatus });
       await creditWorkerOnPayment(order.id);
+      notifyOrderTransition({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: nextStatus,
+        customerId: order.customerId,
+        workerId: order.workerId,
+      });
     }
 
     return context.json({ success: true, data: formatPayment(updated) });
@@ -236,6 +260,13 @@ paymentsRouter.post("/payments/simulate-paid", authMiddleware, async (context) =
     const nextStatus = transitionOrder(order.status, "PAID");
     await orderRepo.update(order.id, { status: nextStatus });
     await creditWorkerOnPayment(order.id);
+    notifyOrderTransition({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      status: nextStatus,
+      customerId: order.customerId,
+      workerId: order.workerId,
+    });
   }
 
   return context.json({ success: true, data: formatPayment(updated) });

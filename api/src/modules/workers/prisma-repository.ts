@@ -137,6 +137,8 @@ export class PrismaWorkerProfileRepository implements WorkerProfileRepository {
     const nextHomeLocation = patch.homeLocation ?? current.homeLocation;
     const nextIsAvailable = patch.isAvailable ?? current.isAvailable;
     const nextStatus = patch.status ?? current.status;
+    const nextRatingAvg = patch.ratingAvg ?? current.ratingAvg;
+    const nextTotalOrders = patch.totalOrders ?? current.totalOrders;
 
     await prisma.$executeRaw`
       UPDATE worker_profiles
@@ -146,6 +148,8 @@ export class PrismaWorkerProfileRepository implements WorkerProfileRepository {
         home_location = ST_SetSRID(ST_MakePoint(${nextHomeLocation.lng}, ${nextHomeLocation.lat}), 4326)::geography,
         is_available = ${nextIsAvailable},
         status = ${nextStatus}::"WorkerStatus",
+        rating_avg = ${nextRatingAvg},
+        total_orders = ${nextTotalOrders},
         verified_at = CASE WHEN ${nextStatus}::"WorkerStatus" = 'active'::"WorkerStatus" THEN COALESCE(verified_at, CURRENT_TIMESTAMP) ELSE verified_at END
       WHERE user_id = ${userId}
     `;

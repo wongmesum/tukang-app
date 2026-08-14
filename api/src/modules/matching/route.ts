@@ -1,15 +1,13 @@
 import { Hono } from "hono";
 import { authMiddleware } from "../../shared/auth-middleware";
 import { orderRepo } from "../orders/repository";
-import { transitionOrder } from "../orders/state-machine";
-import { workerRepo } from "../workers/repository";
-import { rankCandidates } from "./matcher";
+import { assignWorkerToOrder, findCandidatesForOrder } from "./service";
 import type { MatchCandidate } from "./matcher";
 
 const matchingRouter = new Hono();
 matchingRouter.use("/matching/*", authMiddleware);
 
-// POST /matching/find — find candidates for an order (does not assign)
+// POST /matching/find — rank candidates for an order (does not assign)
 matchingRouter.post("/matching/find", async (context) => {
   const body = await context.req.json() as { order_id?: string };
 
@@ -28,15 +26,7 @@ matchingRouter.post("/matching/find", async (context) => {
     );
   }
 
-  // Derive category from service_id (e.g. "seed-AC-cuci-ac-split" → "AC")
-  const categoryCode = order.serviceId.split("-")[1] ?? "";
-
-  const allWorkers = await workerRepo.findAll();
-  const candidates = rankCandidates({
-    categoryCode,
-    customerLocation: order.customerLocation,
-    workers: allWorkers,
-  });
+  const { categoryCode, candidates } = await findCandidatesForOrder(order);
 
   return context.json({
     success: true,
@@ -55,7 +45,7 @@ matchingRouter.post("/matching/find", async (context) => {
   });
 });
 
-// POST /matching/assign — pick best candidate and assign to order
+// POST /matching/assign — assign a worker (best candidate, or a specific one)
 matchingRouter.post("/matching/assign", async (context) => {
   const body = await context.req.json() as { order_id?: string; worker_id?: string };
 
@@ -74,62 +64,59 @@ matchingRouter.post("/matching/assign", async (context) => {
     );
   }
 
-  if (order.status !== "PENDING") {
-    return context.json(
-      { success: false, error: { code: "CONFLICT", message: "Order sudah di-match atau tidak dalam status PENDING" } },
-      409,
-    );
-  }
-
-  const categoryCode = order.serviceId.split("-")[1] ?? "";
-  const allWorkers = await workerRepo.findAll();
-  const candidates = rankCandidates({
-    categoryCode,
-    customerLocation: order.customerLocation,
-    workers: allWorkers,
+  const result = await assignWorkerToOrder({
+    order,
+    ...(body.worker_id ? { preferredWorkerId: body.worker_id } : {}),
   });
 
-  // If specific worker_id provided, use it; otherwise pick best
-  let selectedWorkerId: string | null = null;
-
-  if (body.worker_id) {
-    const isEligible = candidates.some((c) => c.workerId === body.worker_id);
-    if (!isEligible) {
-      return context.json(
-        { success: false, error: { code: "CONFLICT", message: "Tukang tidak tersedia atau tidak memenuhi syarat" } },
-        409,
-      );
+  if (!result.ok) {
+    switch (result.reason) {
+      case "NOT_PENDING":
+        return context.json(
+          {
+            success: false,
+            error: {
+              code: "CONFLICT",
+              message: "Order sudah di-match atau tidak dalam status PENDING",
+            },
+          },
+          409,
+        );
+      case "WORKER_NOT_ELIGIBLE":
+        return context.json(
+          {
+            success: false,
+            error: {
+              code: "CONFLICT",
+              message: "Tukang tidak tersedia atau tidak memenuhi syarat",
+            },
+          },
+          409,
+        );
+      case "NO_WORKER_AVAILABLE":
+        return context.json(
+          {
+            success: false,
+            error: {
+              code: "NO_WORKER_AVAILABLE",
+              message: "Tidak ada tukang tersedia di area ini",
+            },
+          },
+          422,
+        );
     }
-    selectedWorkerId = body.worker_id;
-  } else {
-    if (candidates.length === 0) {
-      return context.json(
-        { success: false, error: { code: "NO_WORKER_AVAILABLE", message: "Tidak ada tukang tersedia di area ini" } },
-        422,
-      );
-    }
-    selectedWorkerId = candidates[0]!.workerId;
   }
-
-  // Transition PENDING → MATCHED
-  const nextStatus = transitionOrder(order.status, "MATCHED");
-  const updated = await orderRepo.update(order.id, {
-    status: nextStatus,
-    workerId: selectedWorkerId,
-  });
-
-  const chosen = candidates.find((c) => c.workerId === selectedWorkerId);
 
   return context.json({
     success: true,
     data: {
-      order_id: updated.id,
-      order_number: updated.orderNumber,
-      status: updated.status,
+      order_id: result.order.id,
+      order_number: result.order.orderNumber,
+      status: result.order.status,
       assigned_worker: {
-        worker_id: selectedWorkerId,
-        distance_km: chosen?.distanceKm ?? null,
-        rating_avg: chosen?.ratingAvg ?? null,
+        worker_id: result.workerId,
+        distance_km: result.candidate.distanceKm,
+        rating_avg: result.candidate.ratingAvg,
       },
     },
   });

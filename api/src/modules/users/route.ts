@@ -188,15 +188,19 @@ usersRouter.patch("/me/addresses/:id", async (context) => {
     await addressRepo.clearDefaults(authUser.userId);
   }
 
-  const updated = await addressRepo.update(id, {
-    label: parsed.data.label,
-    fullAddress: parsed.data.full_address,
-    lat: parsed.data.lat,
-    lng: parsed.data.lng,
-    district: parsed.data.district,
-    city: parsed.data.city,
-    isDefault: parsed.data.is_default,
-  });
+  // Build the patch from provided fields only. Spreading explicit undefined
+  // into the stored record would blank out fields the client never sent —
+  // e.g. toggling is_default alone would wipe the label and coordinates.
+  const patch: Parameters<typeof addressRepo.update>[1] = {};
+  if (parsed.data.label !== undefined) patch.label = parsed.data.label;
+  if (parsed.data.full_address !== undefined) patch.fullAddress = parsed.data.full_address;
+  if (parsed.data.lat !== undefined) patch.lat = parsed.data.lat;
+  if (parsed.data.lng !== undefined) patch.lng = parsed.data.lng;
+  if (parsed.data.district !== undefined) patch.district = parsed.data.district;
+  if (parsed.data.city !== undefined) patch.city = parsed.data.city;
+  if (parsed.data.is_default !== undefined) patch.isDefault = parsed.data.is_default;
+
+  const updated = await addressRepo.update(id, patch);
 
   return context.json({
     success: true,

@@ -1,4 +1,6 @@
 import type { Context, Next } from "hono";
+import { env } from "../config/env";
+import { getRedis } from "./redis";
 
 interface RateLimitEntry {
   count: number;
@@ -10,6 +12,7 @@ interface RateLimiterOptions {
   maxRequests: number;
   keyFn?: (context: Context) => string;
   message?: string;
+  prefix?: string;
 }
 
 const DEFAULT_KEY_FN = (context: Context): string => {
@@ -20,12 +23,13 @@ const DEFAULT_KEY_FN = (context: Context): string => {
   );
 };
 
-export function createRateLimiter(options: RateLimiterOptions) {
+// --- In-memory rate limiter (single instance, dev/test) ---
+
+function createInMemoryRateLimiter(options: RateLimiterOptions) {
   const { windowMs, maxRequests, message = "Terlalu banyak request" } = options;
   const keyFn = options.keyFn ?? DEFAULT_KEY_FN;
   const store = new Map<string, RateLimitEntry>();
 
-  // Periodic cleanup to prevent unbounded memory growth
   const CLEANUP_INTERVAL_MS = Math.max(windowMs * 2, 60_000);
   let lastCleanup = Date.now();
 
@@ -74,14 +78,71 @@ export function createRateLimiter(options: RateLimiterOptions) {
   };
 }
 
-// Pre-configured limiters for common use cases
+// --- Redis rate limiter (multi-instance, production) ---
+
+function createRedisRateLimiter(options: RateLimiterOptions) {
+  const { windowMs, maxRequests, message = "Terlalu banyak request" } = options;
+  const keyFn = options.keyFn ?? DEFAULT_KEY_FN;
+  const prefix = options.prefix ?? "rl";
+  const windowSeconds = Math.ceil(windowMs / 1000);
+
+  return async function rateLimitMiddleware(context: Context, next: Next): Promise<Response | void> {
+    const redis = getRedis();
+    const clientKey = keyFn(context);
+    const redisKey = `${prefix}:${clientKey}`;
+
+    try {
+      const count = await redis.incr(redisKey);
+
+      // Set TTL on first request in this window
+      if (count === 1) {
+        await redis.expire(redisKey, windowSeconds);
+      }
+
+      if (count > maxRequests) {
+        const ttl = await redis.ttl(redisKey);
+        const retryAfterSec = ttl > 0 ? ttl : windowSeconds;
+        context.header("Retry-After", String(retryAfterSec));
+        return context.json(
+          {
+            success: false,
+            error: {
+              code: "TOO_MANY_REQUESTS",
+              message,
+              retry_after_seconds: retryAfterSec,
+            },
+          },
+          429,
+        );
+      }
+
+      await next();
+    } catch {
+      // If Redis fails, allow the request (fail-open)
+      await next();
+    }
+  };
+}
+
+// --- Factory: picks implementation based on environment ---
+
+export function createRateLimiter(options: RateLimiterOptions) {
+  if (env.NODE_ENV === "test" || !env.REDIS_URL) {
+    return createInMemoryRateLimiter(options);
+  }
+  return createRedisRateLimiter(options);
+}
+
+// Pre-configured limiters
 export const generalLimiter = createRateLimiter({
   windowMs: 60_000,
   maxRequests: 100,
+  prefix: "rl:gen",
 });
 
 export const otpLimiter = createRateLimiter({
   windowMs: 60_000,
   maxRequests: 5,
+  prefix: "rl:otp",
   message: "Terlalu banyak permintaan OTP. Coba lagi sebentar.",
 });

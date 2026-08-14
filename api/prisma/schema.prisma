@@ -46,6 +46,16 @@ enum WalletTransactionType {
   debit
 }
 
+enum DisputeFiledBy {
+  customer
+  worker
+}
+
+enum DisputeStatus {
+  open
+  resolved
+}
+
 model User {
   id          String   @id @default(uuid())
   phone       String   @unique @db.VarChar(15)
@@ -160,6 +170,7 @@ model Order {
   addressId          String         @map("address_id")
   customerLocation   Unsupported("geography(Point, 4326)") @map("customer_location")
   scheduledAt        DateTime?      @map("scheduled_at")
+  matchedAt          DateTime?      @map("matched_at")
   startedAt          DateTime?      @map("started_at")
   completedAt        DateTime?      @map("completed_at")
   createdAt          DateTime       @default(now()) @map("created_at")
@@ -172,6 +183,8 @@ model Order {
   pricing  OrderPricing?
   payments Payment[]
   review   Review?
+  disputes Dispute[]
+  messages Message[]
 
   @@index([customerId, createdAt(sort: Desc)])
   @@index([workerId, status])
@@ -193,6 +206,7 @@ model OrderPricing {
   totalEstimate      Int      @map("total_estimate")
   totalFinal         Int?     @map("total_final")
   actualDuration     Decimal? @map("actual_duration") @db.Decimal(4, 1)
+  cancellationFee    Int?     @map("cancellation_fee")
 
   order Order @relation(fields: [orderId], references: [id])
 
@@ -232,6 +246,39 @@ model Review {
   worker   User  @relation("WorkerReviews", fields: [workerId], references: [id])
 
   @@map("reviews")
+}
+
+model Message {
+  id        String    @id @default(uuid())
+  orderId   String    @map("order_id")
+  senderId  String    @map("sender_id")
+  content   String
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId, createdAt])
+  @@map("messages")
+}
+
+model Dispute {
+  id          String         @id @default(uuid())
+  orderId     String         @map("order_id")
+  filedById   String         @map("filed_by_id")
+  filedByRole DisputeFiledBy @map("filed_by_role")
+  reason      String
+  photos      String[]
+  status      DisputeStatus  @default(open)
+  resolution  String?
+  refunded    Boolean        @default(false)
+  resolvedAt  DateTime?      @map("resolved_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([status, createdAt(sort: Desc)])
+  @@map("disputes")
 }
 
 model WorkerWallet {

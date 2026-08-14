@@ -18,6 +18,7 @@ function mapPricing(p: OrderPricing | null): OrderPricingSnapshot {
       surchargeHoliday: 0, surchargeNight: 0, surchargeWeekend: 0,
       surchargeUrgent: 0, surchargeFloor: 0,
       totalEstimate: 0, totalFinal: null, actualDuration: null,
+      cancellationFee: null,
     };
   }
   return {
@@ -32,6 +33,7 @@ function mapPricing(p: OrderPricing | null): OrderPricingSnapshot {
     totalEstimate: p.totalEstimate,
     totalFinal: p.totalFinal,
     actualDuration: p.actualDuration ? Number(p.actualDuration) : null,
+    cancellationFee: p.cancellationFee,
   };
 }
 
@@ -50,6 +52,7 @@ function mapToRecord(o: OrderWithPricing, location: { lat: number; lng: number }
     addressId: o.addressId,
     customerLocation: location,
     scheduledAt: o.scheduledAt,
+    matchedAt: o.matchedAt,
     startedAt: o.startedAt,
     completedAt: o.completedAt,
     createdAt: o.createdAt,
@@ -175,6 +178,7 @@ export class PrismaOrderRepository implements OrderRepository {
     const orderData: Record<string, unknown> = {};
     if (patch.status !== undefined) orderData.status = patch.status;
     if (patch.workerId !== undefined) orderData.workerId = patch.workerId;
+    if (patch.matchedAt !== undefined) orderData.matchedAt = patch.matchedAt;
     if (patch.startedAt !== undefined) orderData.startedAt = patch.startedAt;
     if (patch.completedAt !== undefined) orderData.completedAt = patch.completedAt;
 
@@ -187,6 +191,9 @@ export class PrismaOrderRepository implements OrderRepository {
       const pricingData: Record<string, unknown> = {};
       if (patch.pricing.totalFinal !== undefined) pricingData.totalFinal = patch.pricing.totalFinal;
       if (patch.pricing.actualDuration !== undefined) pricingData.actualDuration = patch.pricing.actualDuration;
+      if (patch.pricing.cancellationFee !== undefined) {
+        pricingData.cancellationFee = patch.pricing.cancellationFee;
+      }
 
       if (Object.keys(pricingData).length > 0) {
         await prisma.orderPricing.update({ where: { orderId: id }, data: pricingData });
@@ -196,6 +203,15 @@ export class PrismaOrderRepository implements OrderRepository {
     const result = await this.findById(id);
     if (!result) throw new Error("Order not found after update");
     return result;
+  }
+
+  async findByStatuses(statuses: OrderStatus[]): Promise<OrderRecord[]> {
+    const orders = await prisma.order.findMany({
+      where: { status: { in: statuses } },
+      orderBy: { createdAt: "asc" },
+      include: { pricing: true },
+    });
+    return this.attachLocations(orders);
   }
 
   private async attachLocations(orders: OrderWithPricing[]): Promise<OrderRecord[]> {
