@@ -100,6 +100,9 @@ flutter run --flavor development
 | Worker | `POST /v1/worker/orders/:id/complete` | Selesai |
 | Payment | `POST /v1/payments/qris/create` | Generate QRIS |
 | Upload | `POST /v1/upload/image` | Upload foto |
+| Dispute | `POST /v1/orders/:id/dispute` | Lapor sengketa (pelanggan/tukang) |
+| Dispute | `GET /v1/admin/disputes?status=open` | Daftar sengketa + alasan |
+| Dispute | `POST /v1/admin/disputes/:id/resolve` | Selesaikan sengketa |
 | WebSocket | `ws://host/v1/realtime?token=jwt` | Real-time tracking |
 | Admin | `GET /v1/admin/reports/summary` | Dashboard stats |
 

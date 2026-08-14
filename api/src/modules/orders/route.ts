@@ -359,10 +359,13 @@ ordersRouter.post("/worker/orders/:id/reject", requireRole("worker"), async (con
     );
   }
 
-  // Re-queue: drop the assignment and send it back to PENDING.
+  // Re-queue: drop the assignment and send it back to PENDING. Clearing
+  // matchedAt stops the accept-timeout clock for the rejected assignment.
+  const requeuedStatus = transitionOrder(order.status, "PENDING");
   const requeued = await orderRepo.update(id, {
-    status: "PENDING",
+    status: requeuedStatus,
     workerId: null,
+    matchedAt: null,
   });
 
   // Immediately offer it to the next-best worker, excluding the one who just

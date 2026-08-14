@@ -71,17 +71,25 @@ export function fetchOrders(status?: string) {
   return request<any[]>(`/orders${query}`);
 }
 
+// --- Disputes ---
+export function fetchDisputes(status: 'open' | 'resolved' = 'open') {
+  return request<any[]>(`/disputes?status=${status}`);
+}
+
+export function resolveDisputeById(
+  disputeId: string,
+  payload: { resolution: string; refund: boolean; final_status?: string },
+) {
+  return request(`/disputes/${disputeId}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function forceTransition(orderId: string, toStatus: string, note?: string) {
   return request(`/orders/${orderId}/force-transition`, {
     method: 'POST',
     body: JSON.stringify({ to_status: toStatus, note }),
-  });
-}
-
-export function resolveDispute(orderId: string, resolution: string, refund: boolean) {
-  return request(`/orders/${orderId}/dispute-resolve`, {
-    method: 'POST',
-    body: JSON.stringify({ resolution, refund }),
   });
 }
 

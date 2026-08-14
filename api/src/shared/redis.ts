@@ -19,6 +19,42 @@ export interface RedisClient {
   quit(): Promise<void>;
 }
 
+/**
+ * Acquire a short-lived distributed lock.
+ *
+ * Used by background jobs so that only one API instance performs a sweep.
+ * Without this, every instance would expire the same orders and send
+ * duplicate notifications.
+ *
+ * Returns false when another holder already has the lock.
+ */
+export async function acquireLock(name: string, ttlSeconds: number): Promise<boolean> {
+  const redis = getRedis();
+  const key = `lock:${name}`;
+
+  // ioredis supports SET key val EX ttl NX; the in-memory client emulates it.
+  const client = redis as RedisClient & {
+    set(k: string, v: string, ...args: unknown[]): Promise<string | null>;
+  };
+
+  try {
+    const result = await client.set(key, "1", "EX", ttlSeconds, "NX");
+    return result === "OK";
+  } catch {
+    // If locking is unavailable, let the caller proceed rather than
+    // silently disabling the background job entirely.
+    return true;
+  }
+}
+
+export async function releaseLock(name: string): Promise<void> {
+  try {
+    await getRedis().del(`lock:${name}`);
+  } catch {
+    // Lock expires on its own via TTL.
+  }
+}
+
 // --- In-memory Redis mock (for tests and local dev without Redis) ---
 
 class InMemoryRedis implements RedisClient {
@@ -34,7 +70,18 @@ class InMemoryRedis implements RedisClient {
     return entry.value;
   }
 
-  async set(key: string, value: string, mode?: "EX", duration?: number): Promise<string | null> {
+  async set(
+    key: string,
+    value: string,
+    mode?: "EX",
+    duration?: number,
+    ...flags: unknown[]
+  ): Promise<string | null> {
+    // Emulate the NX flag so distributed locks behave the same in-memory.
+    if (flags.includes("NX")) {
+      const existing = await this.get(key);
+      if (existing !== null) return null;
+    }
     const expiresAt = mode === "EX" && duration ? Date.now() + duration * 1000 : 0;
     this.store.set(key, { value, expiresAt });
     return "OK";

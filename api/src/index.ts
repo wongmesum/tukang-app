@@ -12,6 +12,7 @@ import { servicesRouter } from "./modules/services/route";
 import { ordersRouter } from "./modules/orders/route";
 import { paymentsRouter } from "./modules/payments/route";
 import { reviewsRouter } from "./modules/reviews/route";
+import { disputesRouter } from "./modules/disputes/route";
 import { workersRouter } from "./modules/workers/route";
 import { matchingRouter } from "./modules/matching/route";
 import { adminRouter } from "./modules/admin/route";
@@ -19,6 +20,7 @@ import { devRouter } from "./modules/dev/route";
 import { seedRouter } from "./modules/dev/seed";
 import { uploadRouter } from "./modules/upload/route";
 import { notificationsRouter } from "./modules/notifications/route";
+import { startTimeoutSweeper, stopTimeoutSweeper } from "./modules/orders/timeout-sweeper";
 import { serveStatic } from "hono/bun";
 
 const app = new Hono();
@@ -77,6 +79,7 @@ app.route("/v1", servicesRouter);
 app.route("/v1", ordersRouter);
 app.route("/v1", paymentsRouter);
 app.route("/v1", reviewsRouter);
+app.route("/v1", disputesRouter);
 app.route("/v1", workersRouter);
 app.route("/v1", matchingRouter);
 app.route("/v1/admin", adminRouter);
@@ -145,10 +148,14 @@ if (import.meta.main) {
   // eslint-disable-next-line no-console
   console.log(`WebSocket available at ws://localhost:${port}/v1/realtime?token=<jwt>`);
 
+  // Re-queue or expire orders whose accept window lapsed.
+  startTimeoutSweeper();
+
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     // eslint-disable-next-line no-console
     console.log(`\n[${signal}] Shutting down gracefully...`);
+    stopTimeoutSweeper();
     server.stop();
     await prisma.$disconnect();
     process.exit(0);

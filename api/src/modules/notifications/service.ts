@@ -109,6 +109,16 @@ export function getOrderNotification(
       title: "Order Dibatalkan ❌",
       body: `Order ${orderNumber} dibatalkan oleh tukang.`,
     },
+    EXPIRED: {
+      type: "order.cancelled",
+      title: "Order Kedaluwarsa ⏰",
+      body: `Order ${orderNumber} kedaluwarsa karena tidak ada tukang yang tersedia. Silakan pesan ulang.`,
+    },
+    DISPUTED: {
+      type: "order.cancelled",
+      title: "Sengketa Dibuka ⚠️",
+      body: `Order ${orderNumber} sedang ditinjau oleh admin.`,
+    },
   };
 
   const entry = mapping[status];

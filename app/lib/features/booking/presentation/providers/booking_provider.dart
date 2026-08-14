@@ -95,6 +95,7 @@ class BookingNotifier extends StateNotifier<BookingState> {
     int floorLevel = 1,
     bool isUrgent = false,
     String? scheduledAt,
+    List<String> photos = const [],
   }) {
     state = state.copyWith(
       serviceId: serviceId,
@@ -104,6 +105,7 @@ class BookingNotifier extends StateNotifier<BookingState> {
       floorLevel: floorLevel,
       isUrgent: isUrgent,
       scheduledAt: scheduledAt,
+      photos: photos,
     );
   }
 

@@ -50,6 +50,7 @@ function mapToRecord(o: OrderWithPricing, location: { lat: number; lng: number }
     addressId: o.addressId,
     customerLocation: location,
     scheduledAt: o.scheduledAt,
+    matchedAt: o.matchedAt,
     startedAt: o.startedAt,
     completedAt: o.completedAt,
     createdAt: o.createdAt,
@@ -175,6 +176,7 @@ export class PrismaOrderRepository implements OrderRepository {
     const orderData: Record<string, unknown> = {};
     if (patch.status !== undefined) orderData.status = patch.status;
     if (patch.workerId !== undefined) orderData.workerId = patch.workerId;
+    if (patch.matchedAt !== undefined) orderData.matchedAt = patch.matchedAt;
     if (patch.startedAt !== undefined) orderData.startedAt = patch.startedAt;
     if (patch.completedAt !== undefined) orderData.completedAt = patch.completedAt;
 
@@ -196,6 +198,15 @@ export class PrismaOrderRepository implements OrderRepository {
     const result = await this.findById(id);
     if (!result) throw new Error("Order not found after update");
     return result;
+  }
+
+  async findByStatuses(statuses: OrderStatus[]): Promise<OrderRecord[]> {
+    const orders = await prisma.order.findMany({
+      where: { status: { in: statuses } },
+      orderBy: { createdAt: "asc" },
+      include: { pricing: true },
+    });
+    return this.attachLocations(orders);
   }
 
   private async attachLocations(orders: OrderWithPricing[]): Promise<OrderRecord[]> {

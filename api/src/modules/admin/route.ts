@@ -4,9 +4,14 @@ import { workerRepo } from "../workers/repository";
 import { orderRepo } from "../orders/repository";
 import { paymentRepo } from "../payments/repository";
 import { serviceRepo } from "../services/repository";
+import { disputeRepo } from "../disputes/repository";
+import { formatDispute } from "../disputes/route";
+import { resolveDisputeSchema } from "../disputes/schema";
+import { notifyOrderTransition } from "../orders/events";
 import { transitionOrder } from "../orders/state-machine";
 import type { OrderStatus } from "../orders/state-machine";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 
 import { paginate, parsePagination } from "../../shared/pagination";
 
@@ -222,29 +227,85 @@ adminRouter.post("/orders/:id/force-transition", async (context) => {
   }
 });
 
-// POST /admin/orders/:id/dispute-resolve
-adminRouter.post("/orders/:id/dispute-resolve", async (context) => {
-  const id = context.req.param("id");
-  const body = await context.req.json() as { resolution?: string; refund?: boolean };
+// GET /admin/disputes?status=open — list disputes with their reasons
+adminRouter.get("/disputes", async (context) => {
+  const statusFilter = (context.req.query("status") ?? "open") as "open" | "resolved";
+  const disputes = await disputeRepo.findByStatus(statusFilter);
 
-  const order = await orderRepo.findById(id);
-  if (!order) {
+  // Join order context so admin sees what the complaint is about without
+  // making a second request per row.
+  const enriched = await Promise.all(
+    disputes.map(async (d) => {
+      const order = await orderRepo.findById(d.orderId);
+      return {
+        ...formatDispute(d),
+        order: order
+          ? {
+              order_number: order.orderNumber,
+              status: order.status,
+              customer_id: order.customerId,
+              worker_id: order.workerId,
+              total_estimate: order.pricing.totalEstimate,
+              total_final: order.pricing.totalFinal,
+            }
+          : null,
+      };
+    }),
+  );
+
+  return context.json({ success: true, data: enriched, meta: { total: enriched.length } });
+});
+
+/**
+ * POST /admin/disputes/:id/resolve
+ *
+ * Closes a dispute. `final_status` decides what happens to the order —
+ * omitting it leaves the order DISPUTED (useful when admin is still
+ * negotiating but wants to record notes).
+ */
+adminRouter.post("/disputes/:id/resolve", async (context) => {
+  const disputeId = context.req.param("id");
+  const body = await context.req.json().catch(() => ({}));
+  const parsed = resolveDisputeSchema
+    .extend({
+      final_status: z.enum(["PAID", "REVIEWED", "CANCELLED_BY_CUSTOMER"]).optional(),
+    })
+    .safeParse(body);
+
+  if (!parsed.success) {
     return context.json(
-      { success: false, error: { code: "NOT_FOUND", message: "Order tidak ditemukan" } },
+      {
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Input tidak valid",
+          details: parsed.error.flatten().fieldErrors,
+        },
+      },
+      400,
+    );
+  }
+
+  const dispute = await disputeRepo.findById(disputeId);
+  if (!dispute) {
+    return context.json(
+      { success: false, error: { code: "NOT_FOUND", message: "Sengketa tidak ditemukan" } },
       404,
     );
   }
 
-  if (order.status !== "DISPUTED") {
+  if (dispute.status === "resolved") {
     return context.json(
-      { success: false, error: { code: "CONFLICT", message: "Order tidak dalam status DISPUTED" } },
+      { success: false, error: { code: "CONFLICT", message: "Sengketa sudah diselesaikan" } },
       409,
     );
   }
 
-  // If refund requested, mark payments refunded
-  if (body.refund) {
-    const payments = await paymentRepo.findByOrderId(id);
+  const { resolution, refund, final_status: finalStatus } = parsed.data;
+
+  // Refund first — if this fails we must not mark the dispute resolved.
+  if (refund) {
+    const payments = await paymentRepo.findByOrderId(dispute.orderId);
     for (const p of payments) {
       if (p.status === "paid") {
         await paymentRepo.markRefunded(p.id);
@@ -252,14 +313,43 @@ adminRouter.post("/orders/:id/dispute-resolve", async (context) => {
     }
   }
 
+  const resolved = await disputeRepo.resolve(disputeId, { resolution, refunded: refund });
+
+  // Optionally move the order out of DISPUTED into its final state.
+  let orderStatus: string | null = null;
+  if (finalStatus) {
+    const order = await orderRepo.findById(dispute.orderId);
+    if (order) {
+      try {
+        const nextStatus = transitionOrder(order.status, finalStatus);
+        const updated = await orderRepo.update(order.id, { status: nextStatus });
+        orderStatus = updated.status;
+
+        notifyOrderTransition({
+          orderId: updated.id,
+          orderNumber: updated.orderNumber,
+          status: nextStatus,
+          customerId: updated.customerId,
+          workerId: updated.workerId,
+        });
+      } catch {
+        return context.json(
+          {
+            success: false,
+            error: {
+              code: "CONFLICT",
+              message: `Sengketa ditutup, tetapi transisi order ke ${finalStatus} tidak diizinkan dari ${order.status}`,
+            },
+          },
+          409,
+        );
+      }
+    }
+  }
+
   return context.json({
     success: true,
-    data: {
-      id: order.id,
-      order_number: order.orderNumber,
-      resolution: body.resolution ?? "Dispute ditutup oleh admin",
-      refunded: body.refund ?? false,
-    },
+    data: { ...formatDispute(resolved), order_status: orderStatus },
   });
 });
 

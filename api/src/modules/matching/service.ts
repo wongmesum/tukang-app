@@ -103,6 +103,8 @@ export async function assignWorkerToOrder(params: {
   const updated = await orderRepo.update(order.id, {
     status: nextStatus,
     workerId: selected.workerId,
+    // Starts the accept-timeout countdown for the sweeper.
+    matchedAt: new Date(),
   });
 
   // Tell the worker there's an order waiting for them

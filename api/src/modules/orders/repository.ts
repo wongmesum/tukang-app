@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import type { CreateOrderInput, OrderRecord, OrderRepository } from "./types";
+import type { OrderStatus } from "./state-machine";
 
 const orders = new Map<string, OrderRecord>();
 
@@ -25,6 +26,7 @@ export class InMemoryOrderRepository implements OrderRepository {
       addressId: input.addressId,
       customerLocation: { ...input.customerLocation },
       scheduledAt: input.scheduledAt,
+      matchedAt: null,
       startedAt: null,
       completedAt: null,
       createdAt: now,
@@ -32,6 +34,10 @@ export class InMemoryOrderRepository implements OrderRepository {
     };
     orders.set(order.id, order);
     return order;
+  }
+
+  async findByStatuses(statuses: OrderStatus[]): Promise<OrderRecord[]> {
+    return [...orders.values()].filter((order) => statuses.includes(order.status));
   }
 
   async findById(id: string): Promise<OrderRecord | null> {

@@ -6,7 +6,11 @@ import 'package:tukangndeso/core/theme/app_colors.dart';
 import 'package:tukangndeso/core/theme/app_spacing.dart';
 import 'package:tukangndeso/core/theme/app_typography.dart';
 import 'package:tukangndeso/core/widgets/location_picker.dart';
+import 'package:tukangndeso/core/widgets/photo_uploader.dart';
 import 'package:tukangndeso/features/booking/presentation/providers/booking_provider.dart';
+import 'package:tukangndeso/services/upload/upload_service.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 class BookingFormScreen extends ConsumerStatefulWidget {
   const BookingFormScreen({super.key, required this.serviceId});
@@ -26,10 +30,46 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
   DateTime? _scheduledAt;
   LocationResult? _selectedLocation;
 
+  /// Remote URLs of photos already uploaded. Uploading on pick (rather than on
+  /// submit) keeps the final submit instant.
+  final List<String> _photoUrls = [];
+  bool _isUploadingPhoto = false;
+
   @override
   void dispose() {
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  /// Pick an image and upload it straight away, storing the returned URL.
+  Future<void> _pickAndUploadPhoto() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      // Shrink before upload so a 12 MP phone photo doesn't hit the 5 MB cap.
+      maxWidth: 1600,
+      imageQuality: 85,
+    );
+
+    if (picked == null) return;
+
+    setState(() => _isUploadingPhoto = true);
+
+    try {
+      final result = await ref.read(uploadServiceProvider).uploadImage(
+            file: File(picked.path),
+            category: UploadCategory.problem,
+          );
+      if (!mounted) return;
+      setState(() => _photoUrls.add(result.url));
+    } on UploadException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploadingPhoto = false);
+    }
   }
 
   void _requestEstimate() {
@@ -50,6 +90,7 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
           floorLevel: _floorLevel,
           isUrgent: _isUrgent,
           scheduledAt: _scheduledAt?.toIso8601String(),
+          photos: _photoUrls,
         );
     // Set location to booking state
     ref.read(bookingProvider.notifier).setAddress(
@@ -78,6 +119,43 @@ class _BookingFormScreenState extends ConsumerState<BookingFormScreen> {
                 hintText: 'Jelaskan masalah atau pekerjaan yang perlu dilakukan...',
               ),
             ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            // Photos
+            Row(
+              children: [
+                Text('Foto Masalah', style: AppTypography.h4),
+                const SizedBox(width: 8),
+                Text('(opsional)', style: AppTypography.caption),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Foto membantu tukang menyiapkan alat yang tepat',
+              style: AppTypography.caption,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            PhotoUploader(
+              photos: _photoUrls,
+              onAdd: _isUploadingPhoto ? () {} : _pickAndUploadPhoto,
+              onRemove: (index) => setState(() => _photoUrls.removeAt(index)),
+              maxPhotos: 5,
+            ),
+            if (_isUploadingPhoto) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('Mengunggah foto...', style: AppTypography.caption),
+                ],
+              ),
+            ],
 
             const SizedBox(height: AppSpacing.lg),
 
