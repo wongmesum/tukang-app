@@ -17,6 +17,9 @@ import { matchingRouter } from "./modules/matching/route";
 import { adminRouter } from "./modules/admin/route";
 import { devRouter } from "./modules/dev/route";
 import { seedRouter } from "./modules/dev/seed";
+import { uploadRouter } from "./modules/upload/route";
+import { notificationsRouter } from "./modules/notifications/route";
+import { serveStatic } from "hono/bun";
 
 const app = new Hono();
 
@@ -62,7 +65,11 @@ app.get("/health", async (context) => {
   });
 });
 
+// Static file serving for uploads (development only)
+app.use("/uploads/*", serveStatic({ root: "./" }));
+
 // Mount routes
+app.route("/v1/upload", uploadRouter);
 app.route("/v1/pricing", pricingRouter);
 app.route("/v1/auth", authRouter);
 app.route("/v1", usersRouter);
@@ -73,6 +80,7 @@ app.route("/v1", reviewsRouter);
 app.route("/v1", workersRouter);
 app.route("/v1", matchingRouter);
 app.route("/v1/admin", adminRouter);
+app.route("/v1/notifications", notificationsRouter);
 app.route("/dev", devRouter);
 app.route("/dev/seed", seedRouter);
 
