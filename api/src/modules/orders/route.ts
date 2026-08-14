@@ -6,7 +6,17 @@ import { cancelOrderSchema, createOrderSchema, rejectOrderSchema } from "./schem
 import { transitionOrder } from "./state-machine";
 import { notifyOrderTransition } from "./events";
 import { tryAutoMatch } from "../matching/service";
-import { workerRepo } from "../workers/repository";
+import { workerRepo, walletRepo } from "../workers/repository";
+import { calculateCancellationFee } from "./cancellation";
+import {
+  claimIdempotencyKey,
+  readIdempotencyKey,
+  releaseIdempotencyKey,
+  storeIdempotentResponse,
+} from "../../shared/idempotency";
+import type { Context } from "hono";
+import type { z } from "zod";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { OrderRecord } from "./types";
 
 function formatOrder(order: OrderRecord) {
@@ -41,9 +51,12 @@ function formatOrder(order: OrderRecord) {
       total_estimate: order.pricing.totalEstimate,
       total_final: order.pricing.totalFinal,
       actual_duration: order.pricing.actualDuration,
+      cancellation_fee: order.pricing.cancellationFee,
     },
   };
 }
+
+type CreateOrderPayload = z.infer<typeof createOrderSchema>;
 
 const ordersRouter = new Hono();
 ordersRouter.use("/orders", authMiddleware);
@@ -73,8 +86,57 @@ ordersRouter.post("/orders", requireRole("customer"), async (context) => {
   const authUser = context.get("user");
   const data = parsed.data;
 
+  // Deduplicate retries. Claimed *after* validation so a rejected payload
+  // doesn't burn the key — the client should be able to fix it and resend.
+  const idempotencyKey = readIdempotencyKey(context.req.header("Idempotency-Key"));
+
+  if (idempotencyKey) {
+    const claim = await claimIdempotencyKey(authUser.userId, idempotencyKey);
+
+    if (claim.state === "completed") {
+      return context.json(
+        claim.response.body as Record<string, unknown>,
+        claim.response.status as ContentfulStatusCode,
+      );
+    }
+
+    if (claim.state === "in_flight") {
+      return context.json(
+        {
+          success: false,
+          error: {
+            code: "CONFLICT",
+            message: "Permintaan sedang diproses. Mohon tunggu sebentar.",
+          },
+        },
+        409,
+      );
+    }
+  }
+
+  try {
+    return await createOrderAndMatch(context, authUser.userId, data, idempotencyKey);
+  } catch (error) {
+    // Free the key so the customer can retry instead of waiting out the TTL.
+    if (idempotencyKey) {
+      await releaseIdempotencyKey(authUser.userId, idempotencyKey);
+    }
+    throw error;
+  }
+});
+
+/**
+ * Creates the order, runs matching, and records the response for idempotent
+ * replay. Split out so the claim/release bookkeeping above stays readable.
+ */
+async function createOrderAndMatch(
+  context: Context,
+  customerId: string,
+  data: CreateOrderPayload,
+  idempotencyKey: string | null,
+) {
   const order = await orderRepo.create({
-    customerId: authUser.userId,
+    customerId,
     serviceId: data.service_id,
     pricingScheme: data.pricing_scheme,
     estimatedDuration: data.estimated_duration,
@@ -95,6 +157,7 @@ ordersRouter.post("/orders", requireRole("customer"), async (context) => {
       totalEstimate: data.pricing.total_estimate,
       totalFinal: null,
       actualDuration: null,
+      cancellationFee: null,
     },
   });
 
@@ -104,7 +167,7 @@ ordersRouter.post("/orders", requireRole("customer"), async (context) => {
   const matchResult = await tryAutoMatch(order);
   const finalOrder = matchResult.ok ? matchResult.order : order;
 
-  return context.json({
+  const responseBody = {
     success: true,
     data: {
       ...formatOrder(finalOrder),
@@ -116,8 +179,16 @@ ordersRouter.post("/orders", requireRole("customer"), async (context) => {
           }
         : { matched: false, reason: matchResult.reason },
     },
-  });
-});
+  };
+
+  // Persist the outcome so a retry with the same key replays it rather than
+  // creating a second order.
+  if (idempotencyKey) {
+    await storeIdempotentResponse(customerId, idempotencyKey, 200, responseBody);
+  }
+
+  return context.json(responseBody);
+}
 
 import { paginate, parsePagination } from "../../shared/pagination";
 
@@ -190,9 +261,30 @@ ordersRouter.post("/orders/:id/cancel", async (context) => {
     );
   }
 
+  // Compute the fee from the status *before* cancelling — afterwards the
+  // status is CANCELLED and the original context is gone.
+  const feeResult = calculateCancellationFee({
+    status: order.status,
+    travelCost: order.pricing.travelCost,
+  });
+
   try {
     const nextStatus = transitionOrder(order.status, "CANCELLED_BY_CUSTOMER");
-    const updated = await orderRepo.update(id, { status: nextStatus });
+    const updated = await orderRepo.update(id, {
+      status: nextStatus,
+      pricing: { ...order.pricing, cancellationFee: feeResult.fee },
+    });
+
+    // Compensate the worker for a trip they already started.
+    if (feeResult.workerCompensation > 0 && order.workerId) {
+      await creditCancellationFee(
+        order.workerId,
+        feeResult.workerCompensation,
+        updated.orderNumber,
+        updated.id,
+      );
+    }
+
     notifyOrderTransition({
       orderId: updated.id,
       orderNumber: updated.orderNumber,
@@ -200,7 +292,17 @@ ordersRouter.post("/orders/:id/cancel", async (context) => {
       customerId: updated.customerId,
       workerId: updated.workerId,
     });
-    return context.json({ success: true, data: formatOrder(updated) });
+
+    return context.json({
+      success: true,
+      data: {
+        ...formatOrder(updated),
+        cancellation: {
+          fee: feeResult.fee,
+          reason: feeResult.reason,
+        },
+      },
+    });
   } catch {
     return context.json(
       {
@@ -214,6 +316,32 @@ ordersRouter.post("/orders/:id/cancel", async (context) => {
     );
   }
 });
+
+/**
+ * Credit a cancellation fee to the worker's wallet.
+ *
+ * Best-effort: the cancellation itself is already committed, so a wallet
+ * failure must not surface as a failed cancellation. It is logged as a
+ * separate transaction so the worker can see why the money arrived.
+ */
+async function creditCancellationFee(
+  workerId: string,
+  amount: number,
+  orderNumber: string,
+  orderId: string,
+): Promise<void> {
+  try {
+    await walletRepo.addTransaction(
+      workerId,
+      "credit",
+      amount,
+      `Kompensasi pembatalan order ${orderNumber}`,
+      orderId,
+    );
+  } catch {
+    // Ignore — reconciliation can recover this from the stored fee.
+  }
+}
 
 // --- Worker endpoints ---
 

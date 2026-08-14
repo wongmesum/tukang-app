@@ -71,6 +71,18 @@ class RealtimeService {
         ),
       );
 
+  /// Incoming chat messages
+  Stream<ChatMessageEvent> get chatMessages =>
+      _ws.on('chat.message').map(
+        (e) => ChatMessageEvent(
+          orderId: e.payload['order_id'] as String,
+          messageId: e.payload['message_id'] as String,
+          senderId: e.payload['sender_id'] as String,
+          content: e.payload['content'] as String,
+          createdAt: e.payload['created_at'] as String? ?? '',
+        ),
+      );
+
   /// All raw events (for debugging)
   Stream<WsEvent> get allEvents => _ws.events;
 }
@@ -117,4 +129,20 @@ class WorkerLocationEvent {
   final String orderId;
   final double lat;
   final double lng;
+}
+
+class ChatMessageEvent {
+  const ChatMessageEvent({
+    required this.orderId,
+    required this.messageId,
+    required this.senderId,
+    required this.content,
+    required this.createdAt,
+  });
+
+  final String orderId;
+  final String messageId;
+  final String senderId;
+  final String content;
+  final String createdAt;
 }

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 import 'package:tukangndeso/features/booking/data/booking_repository.dart';
 
 /// Booking state management
@@ -20,6 +21,7 @@ class BookingState {
     this.createdOrderId,
     this.matchedWorkerId,
     this.noWorkerAvailable = false,
+    this.idempotencyKey,
   });
 
   final String? serviceId;
@@ -43,6 +45,9 @@ class BookingState {
   /// True when no eligible worker was available in range.
   final bool noWorkerAvailable;
 
+  /// Deduplicates submit retries for this booking attempt.
+  final String? idempotencyKey;
+
   BookingState copyWith({
     String? serviceId,
     String? pricingScheme,
@@ -60,6 +65,7 @@ class BookingState {
     String? createdOrderId,
     String? matchedWorkerId,
     bool? noWorkerAvailable,
+    String? idempotencyKey,
   }) {
     return BookingState(
       serviceId: serviceId ?? this.serviceId,
@@ -78,6 +84,7 @@ class BookingState {
       createdOrderId: createdOrderId ?? this.createdOrderId,
       matchedWorkerId: matchedWorkerId ?? this.matchedWorkerId,
       noWorkerAvailable: noWorkerAvailable ?? this.noWorkerAvailable,
+      idempotencyKey: idempotencyKey ?? this.idempotencyKey,
     );
   }
 }
@@ -106,6 +113,11 @@ class BookingNotifier extends StateNotifier<BookingState> {
       isUrgent: isUrgent,
       scheduledAt: scheduledAt,
       photos: photos,
+      // A fresh key per booking attempt. Generating it here (rather than at
+      // submit time) means double-tapping submit reuses the same key and is
+      // deduplicated, while genuinely editing the form and resubmitting
+      // produces a new key and is allowed through as a new order.
+      idempotencyKey: const Uuid().v4(),
     );
   }
 
@@ -148,18 +160,21 @@ class BookingNotifier extends StateNotifier<BookingState> {
 
     state = state.copyWith(isLoading: true);
 
-    final response = await _repository.createOrder(BookingInput(
-      serviceId: state.serviceId!,
-      pricingScheme: state.pricingScheme,
-      estimatedDuration: state.duration,
-      description: state.description,
-      photos: state.photos,
-      addressId: state.addressId!,
-      customerLocation: state.customerLocation!,
-      scheduledAt: state.scheduledAt,
-      isUrgent: state.isUrgent,
-      floorLevel: state.floorLevel,
-    ));
+    final response = await _repository.createOrder(
+      BookingInput(
+        serviceId: state.serviceId!,
+        pricingScheme: state.pricingScheme,
+        estimatedDuration: state.duration,
+        description: state.description,
+        photos: state.photos,
+        addressId: state.addressId!,
+        customerLocation: state.customerLocation!,
+        scheduledAt: state.scheduledAt,
+        isUrgent: state.isUrgent,
+        floorLevel: state.floorLevel,
+      ),
+      idempotencyKey: state.idempotencyKey,
+    );
 
     if (response.success && response.data != null) {
       final data = response.data!;

@@ -15,7 +15,8 @@ export type NotificationType =
   | "order.completed"
   | "order.paid"
   | "order.cancelled"
-  | "worker.verified";
+  | "worker.verified"
+  | "chat.message";
 
 export interface NotificationPayload {
   type: NotificationType;

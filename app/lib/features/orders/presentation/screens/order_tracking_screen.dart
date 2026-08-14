@@ -126,6 +126,15 @@ class _OrderTrackingScreenState extends ConsumerState<OrderTrackingScreen> {
                     totalOrders: order.workerTotalOrders ?? 0,
                     distanceKm: order.distanceKm,
                   ),
+                  const SizedBox(height: AppSpacing.sm),
+                  OutlinedButton.icon(
+                    onPressed: () => context.push(
+                      '/orders/${widget.orderId}/chat',
+                      extra: order.workerName,
+                    ),
+                    icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                    label: const Text('Chat dengan Tukang'),
+                  ),
                   const SizedBox(height: AppSpacing.lg),
                 ],
 

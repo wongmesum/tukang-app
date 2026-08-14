@@ -30,6 +30,14 @@ class ApiEndpoints {
   static String payOrder(String id) => '/orders/$id/pay';
   static String reviewOrder(String id) => '/orders/$id/review';
 
+  // Chat
+  static String messages(String orderId) => '/orders/$orderId/messages';
+  static String markMessagesRead(String orderId) => '/orders/$orderId/messages/read';
+
+  // Disputes
+  static String fileDispute(String orderId) => '/orders/$orderId/dispute';
+  static String orderDisputes(String orderId) => '/orders/$orderId/disputes';
+
   // Orders (Worker)
   static const String workerIncoming = '/worker/orders/incoming';
   static const String workerActive = '/worker/orders/active';

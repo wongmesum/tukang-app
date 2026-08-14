@@ -184,6 +184,7 @@ model Order {
   payments Payment[]
   review   Review?
   disputes Dispute[]
+  messages Message[]
 
   @@index([customerId, createdAt(sort: Desc)])
   @@index([workerId, status])
@@ -205,6 +206,7 @@ model OrderPricing {
   totalEstimate      Int      @map("total_estimate")
   totalFinal         Int?     @map("total_final")
   actualDuration     Decimal? @map("actual_duration") @db.Decimal(4, 1)
+  cancellationFee    Int?     @map("cancellation_fee")
 
   order Order @relation(fields: [orderId], references: [id])
 
@@ -244,6 +246,20 @@ model Review {
   worker   User  @relation("WorkerReviews", fields: [workerId], references: [id])
 
   @@map("reviews")
+}
+
+model Message {
+  id        String    @id @default(uuid())
+  orderId   String    @map("order_id")
+  senderId  String    @map("sender_id")
+  content   String
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId, createdAt])
+  @@map("messages")
 }
 
 model Dispute {

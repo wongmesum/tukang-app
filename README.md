@@ -100,6 +100,9 @@ flutter run --flavor development
 | Worker | `POST /v1/worker/orders/:id/complete` | Selesai |
 | Payment | `POST /v1/payments/qris/create` | Generate QRIS |
 | Upload | `POST /v1/upload/image` | Upload foto |
+| Chat | `POST /v1/orders/:id/messages` | Kirim pesan ke pihak lain |
+| Chat | `GET /v1/orders/:id/messages` | Riwayat chat + jumlah belum dibaca |
+| Chat | `POST /v1/orders/:id/messages/read` | Tandai sudah dibaca |
 | Dispute | `POST /v1/orders/:id/dispute` | Lapor sengketa (pelanggan/tukang) |
 | Dispute | `GET /v1/admin/disputes?status=open` | Daftar sengketa + alasan |
 | Dispute | `POST /v1/admin/disputes/:id/resolve` | Selesaikan sengketa |
@@ -120,8 +123,22 @@ Client → Server:
 
 Server → Client:
   {"type":"order.status_changed","payload":{"order_id":"...","status":"ACCEPTED"}}
+  {"type":"order.new_match","payload":{"order_id":"...","distance_km":2.4,...}}
   {"type":"worker.location_update","payload":{"worker_id":"...","lat":-7.47,"lng":112.43}}
+  {"type":"chat.message","payload":{"order_id":"...","sender_id":"...","content":"..."}}
   {"type":"pong","payload":{}}
+```
+
+## Idempotency
+
+`POST /v1/orders` menerima header `Idempotency-Key`. Permintaan ulang dengan key
+yang sama mengembalikan order yang sama alih-alih membuat duplikat — melindungi
+dari double-tap dan retry jaringan.
+
+```bash
+curl -X POST localhost:3000/v1/orders \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Authorization: Bearer $TOKEN" ...
 ```
 
 ## Testing
@@ -165,6 +182,17 @@ curl -X POST http://localhost:3000/dev/seed/full | jq .
 | Ongkos Jalan | Rp 1.000/km | Min Rp 5.000, max Rp 50.000 |
 
 **Surcharge:** Libur nasional +50%, Malam +30%, Weekend +20%, Urgent +Rp 25.000, Lantai >3 +Rp 10.000/lantai
+
+### Biaya Pembatalan
+
+| Status saat dibatalkan | Biaya |
+|---|---|
+| `PENDING`, `MATCHED`, `ACCEPTED` | Gratis — tukang belum berangkat |
+| `EN_ROUTE` | Ongkos jalan penuh, seluruhnya jadi kompensasi tukang |
+
+> ⚠️ Angka ini **default yang masuk akal, bukan kebijakan final**. Lihat catatan di
+> `api/src/modules/orders/cancellation.ts` untuk pertanyaan yang perlu diputuskan
+> sebelum peluncuran.
 
 ## Tech Stack
 

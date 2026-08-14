@@ -14,6 +14,8 @@ export interface OrderPricingSnapshot {
   totalEstimate: number;
   totalFinal: number | null;
   actualDuration: number | null;
+  /** Charged when the customer cancels after the worker departed. */
+  cancellationFee: number | null;
 }
 
 export interface OrderRecord {

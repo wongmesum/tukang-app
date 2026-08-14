@@ -67,6 +67,44 @@ export function emitNewOrderMatch(params: {
 }
 
 /**
+ * Deliver a chat message to the other party in real time.
+ */
+export function emitChatMessage(params: {
+  orderId: string;
+  messageId: string;
+  senderId: string;
+  recipientId: string;
+  content: string;
+  createdAt: string;
+}): void {
+  const message: WsMessage = {
+    type: "chat.message",
+    payload: {
+      order_id: params.orderId,
+      message_id: params.messageId,
+      sender_id: params.senderId,
+      content: params.content,
+      created_at: params.createdAt,
+    },
+    timestamp: new Date().toISOString(),
+  };
+
+  // Send to the order room so an open chat screen updates, and to the
+  // recipient's personal channel in case they're elsewhere in the app.
+  connectionManager.broadcastToOrder(params.orderId, message);
+  connectionManager.sendToUser(params.recipientId, message);
+}
+
+/**
+ * Whether a user currently has an open WebSocket.
+ *
+ * Used to skip push notifications for someone already looking at the app.
+ */
+export function isUserConnected(userId: string): boolean {
+  return connectionManager.isUserOnline(userId);
+}
+
+/**
  * Get connection stats — useful for health/admin endpoints.
  */
 export function getRealtimeStats() {

@@ -122,20 +122,32 @@ class BookingRepository {
     }
   }
 
-  /// Submit order
-  Future<ApiResponse<Map<String, dynamic>>> createOrder(BookingInput input) async {
+  /// Submit order.
+  ///
+  /// [idempotencyKey] lets the server recognise a retry of the same booking
+  /// attempt so a double tap or a network retry can't create two orders.
+  Future<ApiResponse<Map<String, dynamic>>> createOrder(
+    BookingInput input, {
+    String? idempotencyKey,
+  }) async {
     try {
-      final response = await _dio.post(ApiEndpoints.orders, data: {
-        'service_id': input.serviceId,
-        'pricing_scheme': input.pricingScheme,
-        'estimated_duration': input.estimatedDuration,
-        'description': input.description,
-        'photos': input.photos,
-        'address_id': input.addressId,
-        'customer_location': input.customerLocation,
-        'scheduled_at': input.scheduledAt,
-        'is_urgent': input.isUrgent,
-      });
+      final response = await _dio.post(
+        ApiEndpoints.orders,
+        options: idempotencyKey != null
+            ? Options(headers: {'Idempotency-Key': idempotencyKey})
+            : null,
+        data: {
+          'service_id': input.serviceId,
+          'pricing_scheme': input.pricingScheme,
+          'estimated_duration': input.estimatedDuration,
+          'description': input.description,
+          'photos': input.photos,
+          'address_id': input.addressId,
+          'customer_location': input.customerLocation,
+          'scheduled_at': input.scheduledAt,
+          'is_urgent': input.isUrgent,
+        },
+      );
       return ApiResponse.fromJson(response.data, (d) => d as Map<String, dynamic>);
     } on DioException catch (e) {
       final data = e.response?.data;

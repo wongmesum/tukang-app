@@ -246,6 +246,7 @@ seedRouter.post("/full", async (context) => {
           totalEstimate: pricing.totalEstimate,
           totalFinal: scenario.status === "PAID" ? pricing.totalEstimate : null,
           actualDuration: null,
+          cancellationFee: null,
         },
       });
 

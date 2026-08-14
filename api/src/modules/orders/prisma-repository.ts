@@ -18,6 +18,7 @@ function mapPricing(p: OrderPricing | null): OrderPricingSnapshot {
       surchargeHoliday: 0, surchargeNight: 0, surchargeWeekend: 0,
       surchargeUrgent: 0, surchargeFloor: 0,
       totalEstimate: 0, totalFinal: null, actualDuration: null,
+      cancellationFee: null,
     };
   }
   return {
@@ -32,6 +33,7 @@ function mapPricing(p: OrderPricing | null): OrderPricingSnapshot {
     totalEstimate: p.totalEstimate,
     totalFinal: p.totalFinal,
     actualDuration: p.actualDuration ? Number(p.actualDuration) : null,
+    cancellationFee: p.cancellationFee,
   };
 }
 
@@ -189,6 +191,9 @@ export class PrismaOrderRepository implements OrderRepository {
       const pricingData: Record<string, unknown> = {};
       if (patch.pricing.totalFinal !== undefined) pricingData.totalFinal = patch.pricing.totalFinal;
       if (patch.pricing.actualDuration !== undefined) pricingData.actualDuration = patch.pricing.actualDuration;
+      if (patch.pricing.cancellationFee !== undefined) {
+        pricingData.cancellationFee = patch.pricing.cancellationFee;
+      }
 
       if (Object.keys(pricingData).length > 0) {
         await prisma.orderPricing.update({ where: { orderId: id }, data: pricingData });
