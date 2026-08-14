@@ -1,24 +1,43 @@
+# TukangNDeso — Docker Compose (Development)
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f api    # Follow API logs
+#   docker compose down -v        # Stop & remove volumes
+#
+# After startup:
+#   curl -X POST http://localhost:3000/dev/seed/full   # Seed demo data
+#   open http://localhost:5173                          # Admin panel
+
+version: "3.9"
+
 services:
-  postgres:
+  # --- PostgreSQL + PostGIS ---
+  db:
     image: postgis/postgis:16-3.4
     container_name: tukangndeso-db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
       POSTGRES_DB: tukangndeso
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./api/prisma/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - ./api/prisma/002_phase3_production_fields.sql:/docker-entrypoint-initdb.d/002_phase3.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tukangndeso"]
       interval: 5s
-      timeout: 3s
+      timeout: 5s
       retries: 5
 
+  # --- Redis (for OTP store & rate limiting in production) ---
   redis:
     image: redis:7-alpine
     container_name: tukangndeso-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -27,5 +46,62 @@ services:
       timeout: 3s
       retries: 5
 
+  # --- Backend API (Bun + Hono) ---
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: tukangndeso-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/tukangndeso?schema=public
+      REPOSITORY_MODE: prisma
+      JWT_SECRET: dev-secret-tukangndeso-docker-compose-32chars
+      JWT_EXPIRES_IN: 7d
+      JWT_REFRESH_EXPIRES_IN: 30d
+      OTP_EXPIRY_SECONDS: 300
+      OTP_MAX_ATTEMPTS: 5
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+      QRIS_WEBHOOK_SECRET: dev-webhook-secret-for-docker
+      # Firebase (optional — leave empty for stub mode)
+      FIREBASE_PROJECT_ID: ""
+      FIREBASE_CLIENT_EMAIL: ""
+      FIREBASE_PRIVATE_KEY: ""
+      # Midtrans (optional — leave empty for stub mode)
+      MIDTRANS_SERVER_KEY: ""
+      MIDTRANS_CLIENT_KEY: ""
+      MIDTRANS_IS_PRODUCTION: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # --- Admin Panel (Vite dev server) ---
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: tukangndeso-admin
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:3000
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   pgdata:
+    driver: local
