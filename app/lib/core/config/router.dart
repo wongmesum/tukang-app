@@ -17,6 +17,7 @@ import 'package:tukangndeso/features/orders/presentation/screens/order_detail_sc
 import 'package:tukangndeso/features/payments/presentation/screens/payment_screen.dart';
 import 'package:tukangndeso/features/reviews/presentation/screens/review_screen.dart';
 import 'package:tukangndeso/features/chat/presentation/screens/chat_screen.dart';
+import 'package:tukangndeso/features/disputes/presentation/screens/dispute_form_screen.dart';
 import 'package:tukangndeso/features/profile/presentation/screens/profile_screen.dart';
 import 'package:tukangndeso/features/profile/presentation/screens/address_list_screen.dart';
 import 'package:tukangndeso/features/worker/presentation/screens/worker_home_screen.dart';
@@ -48,6 +49,7 @@ class Routes {
   static const String payment = '/orders/:id/pay';
   static const String review = '/orders/:id/review';
   static const String chat = '/orders/:id/chat';
+  static const String dispute = '/orders/:id/dispute';
   static const String profile = '/profile';
   static const String addresses = '/profile/addresses';
 
@@ -167,6 +169,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           // you're talking to without an extra request.
           final name = state.extra as String?;
           return ChatScreen(orderId: id, counterpartName: name);
+        },
+      ),
+      GoRoute(
+        path: Routes.dispute,
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          final orderNumber = state.extra as String?;
+          return DisputeFormScreen(orderId: id, orderNumber: orderNumber);
         },
       ),
       GoRoute(

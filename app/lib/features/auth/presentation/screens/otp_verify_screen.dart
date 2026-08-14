@@ -8,6 +8,8 @@ import 'package:tukangndeso/core/theme/app_colors.dart';
 import 'package:tukangndeso/core/theme/app_spacing.dart';
 import 'package:tukangndeso/core/theme/app_typography.dart';
 import 'package:tukangndeso/features/auth/presentation/providers/auth_provider.dart';
+import 'package:tukangndeso/services/realtime/realtime_provider.dart';
+import 'package:tukangndeso/services/push/push_notification_service.dart';
 
 class OtpVerifyScreen extends ConsumerStatefulWidget {
   const OtpVerifyScreen({super.key, required this.phone});
@@ -35,6 +37,12 @@ class _OtpVerifyScreenState extends ConsumerState<OtpVerifyScreen> {
     if (!mounted) return;
 
     if (success) {
+      // A fresh login has no token yet at splash time, so start realtime and
+      // push registration here too — otherwise the first session after login
+      // would receive no notifications at all.
+      ref.read(realtimeServiceProvider).connect();
+      ref.read(pushNotificationProvider).initialize();
+
       final state = ref.read(authProvider);
       if (state.isNewUser) {
         context.go(Routes.completeProfile);

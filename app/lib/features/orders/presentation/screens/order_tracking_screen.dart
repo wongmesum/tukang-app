@@ -166,7 +166,8 @@ class _OrderTrackingScreenState extends ConsumerState<OrderTrackingScreen> {
                     child: const Text('Beri Rating'),
                   ),
 
-                if (['PENDING', 'MATCHED'].contains(order.status))
+                if (['PENDING', 'MATCHED', 'ACCEPTED', 'EN_ROUTE']
+                    .contains(order.status))
                   OutlinedButton(
                     onPressed: () => _cancelOrder(context),
                     style: OutlinedButton.styleFrom(
@@ -174,6 +175,44 @@ class _OrderTrackingScreenState extends ConsumerState<OrderTrackingScreen> {
                       side: const BorderSide(color: AppColors.danger),
                     ),
                     child: const Text('Batalkan Order'),
+                  ),
+
+                // Disputes are only meaningful once work has started or money
+                // is involved — these are exactly the statuses the backend
+                // state machine accepts a dispute from.
+                if (['IN_PROGRESS', 'COMPLETED', 'PAID'].contains(order.status)) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  TextButton.icon(
+                    onPressed: () => context.push(
+                      '/orders/${widget.orderId}/dispute',
+                      extra: order.orderNumber,
+                    ),
+                    icon: const Icon(Icons.report_problem_outlined, size: 18),
+                    label: const Text('Laporkan Masalah'),
+                    style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+                  ),
+                ],
+
+                if (order.status == 'DISPUTED')
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppColors.danger.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.gavel, color: AppColors.danger, size: 20),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            'Sengketa sedang ditinjau admin. Pembayaran ditahan '
+                            'sampai ada keputusan.',
+                            style: AppTypography.caption,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
               ],
             ),

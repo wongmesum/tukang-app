@@ -6,6 +6,8 @@ import 'package:tukangndeso/core/theme/app_colors.dart';
 import 'package:tukangndeso/core/theme/app_spacing.dart';
 import 'package:tukangndeso/core/theme/app_typography.dart';
 import 'package:tukangndeso/features/auth/data/auth_repository.dart';
+import 'package:tukangndeso/services/push/push_notification_service.dart';
+import 'package:tukangndeso/services/realtime/realtime_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -52,6 +54,12 @@ class ProfileScreen extends ConsumerWidget {
           const SizedBox(height: AppSpacing.lg),
           OutlinedButton.icon(
             onPressed: () async {
+              // Unregister the device first — while the token is still valid.
+              // Otherwise the next person to log in on this phone would keep
+              // receiving the previous user's notifications.
+              await ref.read(pushNotificationProvider).dispose();
+              ref.read(realtimeServiceProvider).disconnect();
+
               await ref.read(authRepositoryProvider).logout();
               if (context.mounted) context.go(Routes.phoneInput);
             },

@@ -7,7 +7,14 @@ import { createStorageAdapter, getExtension } from "./storage";
 const uploadRouter = new Hono();
 const storage = createStorageAdapter();
 
-const VALID_CATEGORIES: UploadCategory[] = ["problem", "ktp", "portfolio", "review", "avatar"];
+const VALID_CATEGORIES: UploadCategory[] = [
+  "problem",
+  "ktp",
+  "portfolio",
+  "review",
+  "avatar",
+  "dispute",
+];
 
 // POST /upload/image
 uploadRouter.post("/image", authMiddleware, async (context) => {

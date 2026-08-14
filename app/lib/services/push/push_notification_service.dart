@@ -1,157 +1,149 @@
-import 'dart:convert';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:tukangndeso/core/config/router.dart';
 import 'package:tukangndeso/core/constants/api_endpoints.dart';
 import 'package:tukangndeso/services/api/dio_client.dart';
 import 'package:tukangndeso/services/storage/token_storage.dart';
-import 'dart:io' show Platform;
 
 final pushNotificationProvider = Provider<PushNotificationService>((ref) {
   return PushNotificationService(ref);
 });
 
-/// Background message handler — must be top-level function
+/// Background handler — must be a top-level function so the Flutter engine can
+/// find it in a fresh isolate.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  // Handle background notification data here if needed
-  // For now, Firebase handles display automatically
+  // Display is handled by the OS from the notification payload. Nothing to do
+  // here yet, but the handler must exist or FCM logs a warning on every push.
 }
 
-/// Push Notification Service
+/// Registers this device for push notifications and routes taps.
 ///
-/// Responsibilities:
-/// - Request notification permission
-/// - Get/refresh FCM token
-/// - Register token with backend
-/// - Handle foreground/background messages
-/// - Navigate user based on notification tap
+/// Without [initialize] being called the backend has no device token for the
+/// user, so every `sendToUser` finds an empty token list and silently does
+/// nothing — the whole push chain depends on this running after login.
 class PushNotificationService {
   PushNotificationService(this._ref);
 
   final Ref _ref;
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+
   String? _currentToken;
+  bool _initialized = false;
 
-  /// Initialize Firebase Messaging — call after successful auth
+  /// Call after authentication succeeds. Safe to call more than once.
   Future<void> initialize() async {
-    // 1. Request permission
-    final settings = await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      provisional: false,
-    );
+    if (_initialized) return;
 
-    if (settings.authorizationStatus == AuthorizationStatus.denied) {
-      return; // User denied — don't proceed
-    }
+    try {
+      final settings = await _messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
 
-    // 2. Get FCM token
-    _currentToken = await _messaging.getToken();
-    if (_currentToken != null) {
-      await _registerToken(_currentToken!);
-    }
-
-    // 3. Listen for token refresh
-    _messaging.onTokenRefresh.listen((newToken) async {
-      if (_currentToken != null && _currentToken != newToken) {
-        // Unregister old, register new
-        await _unregisterToken(_currentToken!);
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        // Respect the refusal; orders still work, just without banners.
+        return;
       }
-      _currentToken = newToken;
-      await _registerToken(newToken);
-    });
 
-    // 4. Configure foreground notification display
-    await _messaging.setForegroundNotificationPresentationOptions(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+      _currentToken = await _messaging.getToken();
+      if (_currentToken != null) {
+        await _registerToken(_currentToken!);
+      }
 
-    // 5. Handle foreground messages
-    FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+      // Tokens rotate. Swap the registration so pushes keep arriving.
+      _messaging.onTokenRefresh.listen((newToken) async {
+        final previous = _currentToken;
+        _currentToken = newToken;
+        if (previous != null && previous != newToken) {
+          await _unregisterToken(previous);
+        }
+        await _registerToken(newToken);
+      });
 
-    // 6. Handle notification tap (app in background → opened)
-    FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+      await _messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
 
-    // 7. Check if app was opened from a terminated state by notification
-    final initialMessage = await _messaging.getInitialMessage();
-    if (initialMessage != null) {
-      _handleNotificationTap(initialMessage);
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+
+      // A tap that cold-started the app is delivered here instead.
+      final initialMessage = await _messaging.getInitialMessage();
+      if (initialMessage != null) {
+        _handleNotificationTap(initialMessage);
+      }
+
+      _initialized = true;
+    } catch (error) {
+      // Missing Firebase config or an unavailable device shouldn't break login.
+      debugPrint('[Push] Initialization failed: $error');
     }
   }
 
-  /// Cleanup — call on logout
+  /// Call on logout so the next user of this device doesn't inherit the pushes.
   Future<void> dispose() async {
     if (_currentToken != null) {
       await _unregisterToken(_currentToken!);
       _currentToken = null;
     }
+    _initialized = false;
   }
 
-  // --- Private methods ---
+  // --- Token registration ---
 
-  /// Register device token with backend
   Future<void> _registerToken(String token) async {
     try {
       final hasAuth = await _ref.read(tokenStorageProvider).hasToken();
       if (!hasAuth) return;
 
-      final dio = _ref.read(dioClientProvider).dio;
-      await dio.post('/notifications/register', data: {
-        'token': token,
-        'platform': Platform.isIOS ? 'ios' : 'android',
-      });
-    } catch (_) {
-      // Silently fail — will retry on next app start
+      await _ref.read(dioClientProvider).dio.post(
+            ApiEndpoints.registerDevice,
+            data: {
+              'token': token,
+              'platform': Platform.isIOS ? 'ios' : 'android',
+            },
+          );
+    } catch (error) {
+      // Retried on next app start — not worth surfacing to the user.
+      debugPrint('[Push] Token registration failed: $error');
     }
   }
 
-  /// Unregister device token from backend
   Future<void> _unregisterToken(String token) async {
     try {
-      final dio = _ref.read(dioClientProvider).dio;
-      await dio.post('/notifications/unregister', data: {
-        'token': token,
-      });
+      await _ref.read(dioClientProvider).dio.post(
+            ApiEndpoints.unregisterDevice,
+            data: {'token': token},
+          );
     } catch (_) {
-      // Silently fail
+      // The backend drops invalid tokens on its own when a send fails.
     }
   }
 
-  /// Handle foreground messages — show local notification or update UI
-  void _handleForegroundMessage(RemoteMessage message) {
-    final notification = message.notification;
-    final data = message.data;
+  // --- Tap routing ---
 
-    if (notification == null) return;
-
-    // Foreground notification is automatically displayed by
-    // setForegroundNotificationPresentationOptions.
-    // Additional handling (e.g., updating badge count) can go here.
-
-    // If there's order data, could trigger a state update
-    if (data.containsKey('order_id')) {
-      // Could emit an event to update order screens
-    }
-  }
-
-  /// Handle notification tap — navigate to relevant screen
+  /// Send the user to whatever the notification was about.
   void _handleNotificationTap(RemoteMessage message) {
     final data = message.data;
-
-    // Navigation based on notification data
-    // This would use a navigation service or GoRouter
     final orderId = data['order_id'];
-    final status = data['status'];
 
-    if (orderId != null) {
-      // Navigate to order detail/tracking
-      // In production: use a NavigationService that has access to GoRouter
-      // ref.read(navigationServiceProvider).goTo('/orders/$orderId/tracking');
+    if (orderId == null || orderId is! String || orderId.isEmpty) return;
+
+    final router = _ref.read(routerProvider);
+
+    // Chat pushes should land in the conversation, not the tracking page.
+    if (data['type'] == 'chat') {
+      router.push('/orders/$orderId/chat');
+      return;
     }
+
+    router.push('/orders/$orderId/tracking');
   }
 }

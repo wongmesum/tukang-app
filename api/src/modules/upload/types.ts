@@ -5,7 +5,15 @@ export interface UploadResult {
   mimeType: string;
 }
 
-export type UploadCategory = "problem" | "ktp" | "portfolio" | "review" | "avatar";
+export type UploadCategory =
+  | "problem"
+  | "ktp"
+  | "portfolio"
+  | "review"
+  | "avatar"
+  /** Evidence attached to a dispute — reviewed by admin, kept separate from
+   *  ordinary job photos because it backs a decision about money. */
+  | "dispute";
 
 export const ALLOWED_MIME_TYPES = [
   "image/jpeg",

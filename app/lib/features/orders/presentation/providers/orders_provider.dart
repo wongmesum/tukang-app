@@ -46,6 +46,7 @@ class OrderDetail {
     this.workerName,
     this.workerRating,
     this.workerTotalOrders,
+    this.customerName,
     this.distanceKm,
     this.pricing,
   });
@@ -58,6 +59,10 @@ class OrderDetail {
   final String? workerName;
   final double? workerRating;
   final int? workerTotalOrders;
+
+  /// Shown to the worker so they know who they're serving.
+  final String? customerName;
+
   final double? distanceKm;
   final PricingEstimate? pricing;
 
@@ -72,6 +77,7 @@ class OrderDetail {
       workerName: json['worker_name'] as String?,
       workerRating: (json['worker_rating'] as num?)?.toDouble(),
       workerTotalOrders: json['worker_total_orders'] as int?,
+      customerName: json['customer_name'] as String?,
       distanceKm: (pricingJson?['distance_km'] as num?)?.toDouble(),
       pricing: pricingJson != null ? PricingEstimate.fromJson(pricingJson) : null,
     );

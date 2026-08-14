@@ -25,6 +25,10 @@ class ActiveOrderScreen extends ConsumerStatefulWidget {
 class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
   String _status = 'ACCEPTED';
   bool _isLoading = false;
+
+  /// Loaded from the order detail so chat and the header can name the customer.
+  String? _customerName;
+  String? _orderNumber;
   Timer? _workTimer;
   Timer? _locationTimer;
   int _workSeconds = 0;
@@ -71,6 +75,8 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
         final data = response.data['data'] as Map<String, dynamic>;
         setState(() {
           _status = data['status'] as String;
+          _customerName = data['customer_name'] as String?;
+          _orderNumber = data['order_number'] as String?;
           if (data['started_at'] != null) {
             _startedAt = DateTime.parse(data['started_at'] as String);
             _startWorkTimer();
@@ -188,7 +194,9 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Order Aktif')),
+      appBar: AppBar(
+        title: Text(_orderNumber != null ? 'Order $_orderNumber' : 'Order Aktif'),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(AppSpacing.base),
         child: Column(
@@ -211,6 +219,23 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
 
             // Real-time indicator
             _RealtimeIndicator(),
+
+            const SizedBox(height: AppSpacing.md),
+
+            // Chat with the customer — coordination is often the difference
+            // between finding the house and calling repeatedly.
+            OutlinedButton.icon(
+              onPressed: () => context.push(
+                '/orders/${widget.orderId}/chat',
+                extra: _customerName ?? 'Pelanggan',
+              ),
+              icon: const Icon(Icons.chat_bubble_outline, size: 18),
+              label: Text(
+                _customerName != null
+                    ? 'Chat dengan $_customerName'
+                    : 'Chat dengan Pelanggan',
+              ),
+            ),
 
             const SizedBox(height: AppSpacing.lg),
 
@@ -337,6 +362,42 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
                 child: const Text('Kembali ke Dashboard'),
               ),
             ],
+
+            // The worker needs an escalation path too — most often when a
+            // customer won't pay for finished work.
+            if (['IN_PROGRESS', 'COMPLETED', 'PAID'].contains(_status)) ...[
+              const SizedBox(height: AppSpacing.sm),
+              TextButton.icon(
+                onPressed: () => context.push(
+                  '/orders/${widget.orderId}/dispute',
+                  extra: _orderNumber,
+                ),
+                icon: const Icon(Icons.report_problem_outlined, size: 18),
+                label: const Text('Laporkan Masalah'),
+                style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+              ),
+            ],
+
+            if (_status == 'DISPUTED')
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: AppColors.danger.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.gavel, color: AppColors.danger, size: 20),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        'Sengketa sedang ditinjau admin.',
+                        style: AppTypography.caption,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),

@@ -5,6 +5,7 @@ import 'package:tukangndeso/core/constants/api_endpoints.dart';
 import 'package:tukangndeso/core/theme/app_colors.dart';
 import 'package:tukangndeso/core/theme/app_spacing.dart';
 import 'package:tukangndeso/core/theme/app_typography.dart';
+import 'package:tukangndeso/features/profile/presentation/screens/address_form_screen.dart';
 import 'package:tukangndeso/services/api/dio_client.dart';
 
 class AddressListScreen extends ConsumerStatefulWidget {
@@ -100,7 +101,7 @@ class _AddressListScreenState extends ConsumerState<AddressListScreen> {
     final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => _AddressFormRoute(
+        builder: (_) => AddressFormScreen(
           addressId: addressId,
           initialData: data,
         ),
@@ -283,35 +284,4 @@ class _AddressCard extends StatelessWidget {
   }
 }
 
-/// Simple route wrapper to pass params to AddressFormScreen
-class _AddressFormRoute extends StatelessWidget {
-  const _AddressFormRoute({this.addressId, this.initialData});
 
-  final String? addressId;
-  final Map<String, dynamic>? initialData;
-
-  @override
-  Widget build(BuildContext context) {
-    // Import here to avoid circular
-    return _AddressFormRouteInner(
-        addressId: addressId, initialData: initialData);
-  }
-}
-
-class _AddressFormRouteInner extends ConsumerWidget {
-  const _AddressFormRouteInner({this.addressId, this.initialData});
-
-  final String? addressId;
-  final Map<String, dynamic>? initialData;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Lazy import the form screen to keep this file self-contained
-    // In production, use go_router with extra params instead
-    return Scaffold(
-      appBar: AppBar(
-          title: Text(addressId != null ? 'Edit Alamat' : 'Tambah Alamat')),
-      body: const Center(child: Text('Loading form...')),
-    );
-  }
-}

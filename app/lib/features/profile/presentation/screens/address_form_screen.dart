@@ -42,8 +42,10 @@ class _AddressFormScreenState extends ConsumerState<AddressFormScreen> {
       _districtController.text = data['district'] as String? ?? '';
       _cityController.text = data['city'] as String? ?? 'Mojokerto';
       _isDefault = data['is_default'] as bool? ?? false;
-      final lat = data['lat'] as double?;
-      final lng = data['lng'] as double?;
+      // JSON gives back int when a coordinate happens to be whole, so read as
+      // num before converting — a direct `as double` cast would throw.
+      final lat = (data['lat'] as num?)?.toDouble();
+      final lng = (data['lng'] as num?)?.toDouble();
       if (lat != null && lng != null) {
         _selectedLocation = LocationResult(lat: lat, lng: lng);
       }

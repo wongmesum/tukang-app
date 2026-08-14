@@ -7,6 +7,7 @@ import { transitionOrder } from "./state-machine";
 import { notifyOrderTransition } from "./events";
 import { tryAutoMatch } from "../matching/service";
 import { workerRepo, walletRepo } from "../workers/repository";
+import { userRepo } from "../users/repository";
 import { calculateCancellationFee } from "./cancellation";
 import {
   claimIdempotencyKey,
@@ -223,8 +224,39 @@ ordersRouter.get("/orders/:id", async (context) => {
     );
   }
 
-  return context.json({ success: true, data: formatOrder(order) });
+  // The detail view shows who you're dealing with and offers chat, so it
+  // needs the counterpart's name. Lists deliberately skip this to avoid an
+  // extra lookup per row.
+  const participants = await loadParticipants(order);
+
+  return context.json({
+    success: true,
+    data: { ...formatOrder(order), ...participants },
+  });
 });
+
+/**
+ * Names and worker reputation for an order's two parties.
+ *
+ * Kept out of `formatOrder` so list endpoints stay a single query — only the
+ * detail endpoint pays for these lookups.
+ */
+async function loadParticipants(order: OrderRecord) {
+  const [customer, worker, workerProfile] = await Promise.all([
+    userRepo.findById(order.customerId),
+    order.workerId ? userRepo.findById(order.workerId) : Promise.resolve(null),
+    order.workerId ? workerRepo.findByUserId(order.workerId) : Promise.resolve(null),
+  ]);
+
+  return {
+    customer_name: customer?.name ?? null,
+    customer_phone: customer?.phone ?? null,
+    worker_name: worker?.name ?? null,
+    worker_phone: worker?.phone ?? null,
+    worker_rating: workerProfile?.ratingAvg ?? null,
+    worker_total_orders: workerProfile?.totalOrders ?? null,
+  };
+}
 
 // POST /orders/:id/cancel (customer cancel)
 ordersRouter.post("/orders/:id/cancel", async (context) => {

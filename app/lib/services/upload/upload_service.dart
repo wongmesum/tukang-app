@@ -16,7 +16,8 @@ enum UploadCategory {
   ktp,
   portfolio,
   review,
-  avatar;
+  avatar,
+  dispute;
 
   String get value => name;
 }

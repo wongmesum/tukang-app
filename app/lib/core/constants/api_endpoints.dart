@@ -30,6 +30,10 @@ class ApiEndpoints {
   static String payOrder(String id) => '/orders/$id/pay';
   static String reviewOrder(String id) => '/orders/$id/review';
 
+  // Push notification device tokens
+  static const String registerDevice = '/notifications/register';
+  static const String unregisterDevice = '/notifications/unregister';
+
   // Chat
   static String messages(String orderId) => '/orders/$orderId/messages';
   static String markMessagesRead(String orderId) => '/orders/$orderId/messages/read';

@@ -6,6 +6,7 @@ import 'package:tukangndeso/core/theme/app_colors.dart';
 import 'package:tukangndeso/core/theme/app_typography.dart';
 import 'package:tukangndeso/services/storage/token_storage.dart';
 import 'package:tukangndeso/services/realtime/realtime_provider.dart';
+import 'package:tukangndeso/services/push/push_notification_service.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -34,6 +35,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     if (hasToken) {
       // Connect WebSocket for real-time updates
       ref.read(realtimeServiceProvider).connect();
+
+      // Register this device so the backend has somewhere to send pushes.
+      // Not awaited — a slow permission prompt shouldn't hold up the splash.
+      ref.read(pushNotificationProvider).initialize();
 
       final role = await tokenStorage.getUserRole();
       if (role == 'worker') {

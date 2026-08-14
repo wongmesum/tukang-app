@@ -83,7 +83,13 @@ export class InMemoryAddressRepository implements AddressRepository {
     const addr = addresses.get(id);
     if (!addr) throw new Error("Address not found");
 
-    const updated: AddressRecord = { ...addr, ...input };
+    // Ignore keys explicitly set to undefined — a spread would otherwise
+    // replace stored values with undefined and lose data.
+    const defined = Object.fromEntries(
+      Object.entries(input).filter(([, value]) => value !== undefined),
+    );
+
+    const updated: AddressRecord = { ...addr, ...defined };
     addresses.set(id, updated);
     return updated;
   }
