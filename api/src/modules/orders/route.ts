@@ -4,6 +4,7 @@ import { requireRole } from "../../shared/role-middleware";
 import { orderRepo } from "./repository";
 import { cancelOrderSchema, createOrderSchema, rejectOrderSchema } from "./schema";
 import { transitionOrder } from "./state-machine";
+import { emitOrderStatusChanged } from "../realtime/events";
 import type { OrderRecord } from "./types";
 
 function formatOrder(order: OrderRecord) {
@@ -172,6 +173,13 @@ ordersRouter.post("/orders/:id/cancel", async (context) => {
   try {
     const nextStatus = transitionOrder(order.status, "CANCELLED_BY_CUSTOMER");
     const updated = await orderRepo.update(id, { status: nextStatus });
+    emitOrderStatusChanged({
+      orderId: updated.id,
+      orderNumber: updated.orderNumber,
+      status: nextStatus,
+      customerId: updated.customerId,
+      workerId: updated.workerId,
+    });
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(
@@ -263,6 +271,13 @@ ordersRouter.post("/worker/orders/:id/accept", requireRole("worker"), async (con
     const updated = await orderRepo.update(id, {
       status: nextStatus,
       workerId: authUser.userId,
+    });
+    emitOrderStatusChanged({
+      orderId: updated.id,
+      orderNumber: updated.orderNumber,
+      status: nextStatus,
+      customerId: updated.customerId,
+      workerId: updated.workerId,
     });
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
@@ -356,6 +371,13 @@ ordersRouter.post("/worker/orders/:id/enroute", requireRole("worker"), async (co
   try {
     const nextStatus = transitionOrder(order.status, "EN_ROUTE");
     const updated = await orderRepo.update(id, { status: nextStatus });
+    emitOrderStatusChanged({
+      orderId: updated.id,
+      orderNumber: updated.orderNumber,
+      status: nextStatus,
+      customerId: updated.customerId,
+      workerId: updated.workerId,
+    });
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(
@@ -393,6 +415,13 @@ ordersRouter.post("/worker/orders/:id/arrive", requireRole("worker"), async (con
   try {
     const nextStatus = transitionOrder(order.status, "ARRIVED");
     const updated = await orderRepo.update(id, { status: nextStatus });
+    emitOrderStatusChanged({
+      orderId: updated.id,
+      orderNumber: updated.orderNumber,
+      status: nextStatus,
+      customerId: updated.customerId,
+      workerId: updated.workerId,
+    });
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(
@@ -432,6 +461,13 @@ ordersRouter.post("/worker/orders/:id/start", requireRole("worker"), async (cont
     const updated = await orderRepo.update(id, {
       status: nextStatus,
       startedAt: new Date(),
+    });
+    emitOrderStatusChanged({
+      orderId: updated.id,
+      orderNumber: updated.orderNumber,
+      status: nextStatus,
+      customerId: updated.customerId,
+      workerId: updated.workerId,
     });
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
@@ -477,6 +513,13 @@ ordersRouter.post("/worker/orders/:id/complete", requireRole("worker"), async (c
         ...order.pricing,
         totalFinal: order.pricing.totalEstimate,
       },
+    });
+    emitOrderStatusChanged({
+      orderId: updated.id,
+      orderNumber: updated.orderNumber,
+      status: nextStatus,
+      customerId: updated.customerId,
+      workerId: updated.workerId,
     });
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {

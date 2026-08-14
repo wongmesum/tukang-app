@@ -9,6 +9,9 @@ import 'package:tukangndeso/core/theme/app_spacing.dart';
 import 'package:tukangndeso/core/theme/app_typography.dart';
 import 'package:tukangndeso/core/widgets/order_status_badge.dart';
 import 'package:tukangndeso/services/api/dio_client.dart';
+import 'package:tukangndeso/services/realtime/realtime_provider.dart';
+import 'package:tukangndeso/services/realtime/ws_client.dart';
+import 'package:geolocator/geolocator.dart';
 
 class ActiveOrderScreen extends ConsumerStatefulWidget {
   const ActiveOrderScreen({super.key, required this.orderId});
@@ -23,13 +26,41 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
   String _status = 'ACCEPTED';
   bool _isLoading = false;
   Timer? _workTimer;
+  Timer? _locationTimer;
   int _workSeconds = 0;
   DateTime? _startedAt;
+  StreamSubscription? _statusSub;
 
   @override
   void initState() {
     super.initState();
     _loadOrder();
+    _setupRealtime();
+  }
+
+  void _setupRealtime() {
+    final realtime = ref.read(realtimeServiceProvider);
+
+    // Subscribe to this order's room for status updates (e.g. customer cancel)
+    realtime.subscribeToOrder(widget.orderId);
+
+    _statusSub = realtime.orderStatusChanges
+        .where((e) => e.orderId == widget.orderId)
+        .listen((event) {
+      setState(() => _status = event.status);
+      // If customer cancelled, stop location broadcasting
+      if (_isTerminalStatus(event.status)) {
+        _stopLocationBroadcast();
+      }
+    });
+  }
+
+  bool _isTerminalStatus(String status) {
+    const terminals = [
+      'REVIEWED', 'EXPIRED', 'CANCELLED_BY_CUSTOMER',
+      'CANCELLED_BY_WORKER', 'DISPUTED',
+    ];
+    return terminals.contains(status);
   }
 
   Future<void> _loadOrder() async {
@@ -45,6 +76,10 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
             _startWorkTimer();
           }
         });
+        // Start broadcasting location if EN_ROUTE
+        if (_status == 'EN_ROUTE' || _status == 'ARRIVED') {
+          _startLocationBroadcast();
+        }
       }
     } catch (_) {}
   }
@@ -57,6 +92,44 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
         });
       }
     });
+  }
+
+  /// Start broadcasting GPS location to customer via WebSocket
+  void _startLocationBroadcast() {
+    _locationTimer?.cancel();
+    _locationTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+      await _sendCurrentLocation();
+    });
+    // Also send immediately
+    _sendCurrentLocation();
+  }
+
+  void _stopLocationBroadcast() {
+    _locationTimer?.cancel();
+    _locationTimer = null;
+  }
+
+  Future<void> _sendCurrentLocation() async {
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      final realtime = ref.read(realtimeServiceProvider);
+      realtime.sendLocation(
+        orderId: widget.orderId,
+        lat: position.latitude,
+        lng: position.longitude,
+      );
+    } catch (_) {
+      // GPS unavailable — skip this update silently
+    }
   }
 
   Future<void> _transitionTo(String endpoint) async {
@@ -73,6 +146,14 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
             _startWorkTimer();
           }
         });
+        // Start location broadcast when EN_ROUTE
+        if (_status == 'EN_ROUTE') {
+          _startLocationBroadcast();
+        }
+        // Stop location broadcast when work starts or completes
+        if (_status == 'IN_PROGRESS' || _status == 'COMPLETED') {
+          _stopLocationBroadcast();
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -88,6 +169,12 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
   @override
   void dispose() {
     _workTimer?.cancel();
+    _locationTimer?.cancel();
+    _statusSub?.cancel();
+    try {
+      final realtime = ref.read(realtimeServiceProvider);
+      realtime.unsubscribeFromOrder(widget.orderId);
+    } catch (_) {}
     super.dispose();
   }
 
@@ -120,7 +207,33 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
               ),
             ),
 
+            const SizedBox(height: AppSpacing.sm),
+
+            // Real-time indicator
+            _RealtimeIndicator(),
+
             const SizedBox(height: AppSpacing.lg),
+
+            // Location broadcast indicator when EN_ROUTE
+            if (_locationTimer != null) ...[
+              Card(
+                color: AppColors.info.withOpacity(0.05),
+                child: const Padding(
+                  padding: EdgeInsets.all(AppSpacing.md),
+                  child: Row(
+                    children: [
+                      Icon(Icons.gps_fixed, color: AppColors.info, size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'Lokasi Anda dikirim ke pelanggan',
+                        style: TextStyle(fontSize: 13, color: AppColors.info),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
 
             // Timer (shown when IN_PROGRESS)
             if (_status == 'IN_PROGRESS') ...[
@@ -147,7 +260,8 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
               ElevatedButton.icon(
                 onPressed: _isLoading
                     ? null
-                    : () => _transitionTo(ApiEndpoints.workerEnroute(widget.orderId)),
+                    : () => _transitionTo(
+                        ApiEndpoints.workerEnroute(widget.orderId)),
                 icon: const Icon(Icons.directions_walk),
                 label: const Text('Berangkat ke Lokasi'),
               ),
@@ -156,7 +270,8 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
               ElevatedButton.icon(
                 onPressed: _isLoading
                     ? null
-                    : () => _transitionTo(ApiEndpoints.workerArrive(widget.orderId)),
+                    : () => _transitionTo(
+                        ApiEndpoints.workerArrive(widget.orderId)),
                 icon: const Icon(Icons.location_on),
                 label: const Text('Saya Sudah Tiba'),
               ),
@@ -165,7 +280,8 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
               ElevatedButton.icon(
                 onPressed: _isLoading
                     ? null
-                    : () => _transitionTo(ApiEndpoints.workerStart(widget.orderId)),
+                    : () => _transitionTo(
+                        ApiEndpoints.workerStart(widget.orderId)),
                 icon: const Icon(Icons.play_arrow),
                 label: const Text('Mulai Kerja'),
               ),
@@ -195,7 +311,8 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
                           ),
                         );
                         if (confirm == true) {
-                          await _transitionTo(ApiEndpoints.workerComplete(widget.orderId));
+                          await _transitionTo(
+                              ApiEndpoints.workerComplete(widget.orderId));
                           if (mounted && _status == 'COMPLETED') {
                             context.go(Routes.workerHome);
                           }
@@ -223,6 +340,52 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Small indicator showing real-time connection state
+class _RealtimeIndicator extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final realtime = ref.watch(realtimeServiceProvider);
+
+    return StreamBuilder<WsConnectionState>(
+      stream: realtime.connectionStateStream,
+      initialData: realtime.connectionState,
+      builder: (context, snapshot) {
+        final state = snapshot.data ?? WsConnectionState.disconnected;
+        final (icon, color, label) = switch (state) {
+          WsConnectionState.connected => (
+              Icons.wifi,
+              AppColors.success,
+              'Real-time aktif'
+            ),
+          WsConnectionState.connecting => (
+              Icons.wifi_find,
+              AppColors.warning,
+              'Menghubungkan...'
+            ),
+          WsConnectionState.reconnecting => (
+              Icons.wifi_find,
+              AppColors.warning,
+              'Menghubungkan ulang...'
+            ),
+          WsConnectionState.disconnected => (
+              Icons.wifi_off,
+              AppColors.textHint,
+              'Offline'
+            ),
+        };
+
+        return Row(
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(fontSize: 12, color: color)),
+          ],
+        );
+      },
     );
   }
 }

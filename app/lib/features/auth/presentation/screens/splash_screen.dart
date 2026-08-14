@@ -5,6 +5,7 @@ import 'package:tukangndeso/core/config/router.dart';
 import 'package:tukangndeso/core/theme/app_colors.dart';
 import 'package:tukangndeso/core/theme/app_typography.dart';
 import 'package:tukangndeso/services/storage/token_storage.dart';
+import 'package:tukangndeso/services/realtime/realtime_provider.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -31,6 +32,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     if (!mounted) return;
 
     if (hasToken) {
+      // Connect WebSocket for real-time updates
+      ref.read(realtimeServiceProvider).connect();
+
       final role = await tokenStorage.getUserRole();
       if (role == 'worker') {
         context.go(Routes.workerHome);

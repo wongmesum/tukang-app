@@ -86,15 +86,64 @@ app.route("/dev/seed", seedRouter);
 
 export default app;
 
+// --- WebSocket integration ---
+import { authenticateWsConnection } from "./modules/realtime/auth";
+import { handleWsOpen, handleWsClose, handleWsMessage } from "./modules/realtime/ws-handler";
+import { getRealtimeStats } from "./modules/realtime/events";
+
+// Health endpoint for WebSocket stats
+app.get("/health/ws", (context) => {
+  return context.json({
+    success: true,
+    data: getRealtimeStats(),
+  });
+});
+
 if (import.meta.main) {
   const port = Number(process.env.PORT ?? 3000);
   const server = Bun.serve({
     port,
-    fetch: app.fetch,
+    fetch(req, server) {
+      const url = new URL(req.url);
+
+      // WebSocket upgrade for /v1/realtime
+      if (url.pathname === "/v1/realtime") {
+        const connectionData = authenticateWsConnection(req.url);
+
+        if (!connectionData) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: { code: "UNAUTHORIZED", message: "Token tidak valid" },
+            }),
+            { status: 401, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        const upgraded = server.upgrade(req, { data: connectionData });
+        if (!upgraded) {
+          return new Response("WebSocket upgrade failed", { status: 500 });
+        }
+        return undefined;
+      }
+
+      // Normal HTTP requests handled by Hono
+      return app.fetch(req);
+    },
+    websocket: {
+      open: handleWsOpen,
+      close: handleWsClose,
+      message: handleWsMessage,
+      // Ping/pong keepalive every 30 seconds
+      idleTimeout: 60,
+      maxPayloadLength: 16 * 1024, // 16KB max message
+    },
   });
 
   // eslint-disable-next-line no-console
   console.log(`API running on http://localhost:${port}`);
+  // eslint-disable-next-line no-console
+  console.log(`WebSocket available at ws://localhost:${port}/v1/realtime?token=<jwt>`);
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
