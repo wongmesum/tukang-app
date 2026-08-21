@@ -35,9 +35,12 @@ const envSchema = z.object({
 
   OTP_EXPIRY_SECONDS: z.coerce.number().default(300),
   OTP_MAX_ATTEMPTS: z.coerce.number().default(5),
-  CORS_ORIGINS: z.string().default("http://localhost:3000,http://localhost:5173"),
+  CORS_ORIGINS: z.string().default("http://localhost:3000,http://localhost:3010,http://localhost:5173"),
 
   QRIS_WEBHOOK_SECRET: z.string().min(1).optional(),
+  REDIS_URL: z.string().optional(),
+  CDN_BASE_URL: z.string().url().optional(),
+  UPLOAD_MAX_SIZE_MB: z.coerce.number().default(5),
 });
 
 export type Env = z.infer<typeof envSchema>;

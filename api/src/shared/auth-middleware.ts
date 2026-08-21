@@ -1,6 +1,6 @@
 import type { Context, Next } from "hono";
 import { verifyToken } from "../modules/auth/jwt";
-import { isTokenRevoked } from "../modules/auth/token-revocation";
+import { isTokenRevokedAsync } from "../modules/auth/token-revocation";
 
 export interface AuthUser {
   userId: string;
@@ -32,7 +32,7 @@ export async function authMiddleware(context: Context, next: Next): Promise<Resp
 
   const token = header.slice(7);
 
-  if (isTokenRevoked(token)) {
+  if (await isTokenRevokedAsync(token)) {
     return context.json(
       {
         success: false,

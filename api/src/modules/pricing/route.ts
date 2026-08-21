@@ -1,14 +1,24 @@
 import { Hono } from "hono";
 import { calculatePricing, PricingOutOfServiceAreaError } from "./calculator";
 import { pricingEstimateSchema } from "./schema";
+import { haversineKm } from "../matching/distance";
+import { isNationalHoliday } from "./holidays";
 
-// Stub: in production this calculates actual distance using PostGIS or Maps API
+// Mojokerto Kabupaten center as reference point for distance estimation.
+// When a worker is already assigned, the actual worker location should be used.
+// For pricing estimates (before matching), we use center of service area.
+const SERVICE_AREA_CENTER = { lat: -7.4724, lng: 112.4341 };
+
 function computeDistanceKm(
-  _customerLat: number,
-  _customerLng: number,
+  customerLat: number,
+  customerLng: number,
 ): number {
-  // Placeholder — returns 10 km until we integrate maps/PostGIS
-  return 10;
+  const distance = haversineKm(
+    { lat: customerLat, lng: customerLng },
+    SERVICE_AREA_CENTER,
+  );
+  // Round to 1 decimal place
+  return Math.round(distance * 10) / 10;
 }
 
 const pricingRouter = new Hono();
@@ -49,7 +59,7 @@ pricingRouter.post("/estimate", async (context) => {
       floorLevel: data.floor_level,
       isUrgent: data.is_urgent,
       scheduledAt,
-      isNationalHoliday: false, // TODO: integrate holiday calendar
+      isNationalHoliday: isNationalHoliday(scheduledAt),
     });
 
     const breakdownParts: string[] = [];

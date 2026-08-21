@@ -13,11 +13,17 @@ interface RateLimiterOptions {
 }
 
 const DEFAULT_KEY_FN = (context: Context): string => {
-  return (
+  // If user is authenticated, use userId for more granular limiting
+  const user = context.get("user" as never) as { userId?: string } | undefined;
+  const ip =
     context.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
     context.req.header("x-real-ip") ??
-    "unknown"
-  );
+    "unknown";
+
+  if (user?.userId) {
+    return `user:${user.userId}`;
+  }
+  return `ip:${ip}`;
 };
 
 export function createRateLimiter(options: RateLimiterOptions) {
