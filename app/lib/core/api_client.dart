@@ -4,8 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'auth_state.dart';
 
 /// Base URL for the TukangNDeso API.
-/// Change to production URL when deploying.
-const String kApiBaseUrl = 'http://10.0.2.2:3000';
+///
+/// Override this value in CI or a local release build with:
+/// flutter build apk --dart-define=API_BASE_URL=https://api.example.com
+const String kApiBaseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'http://10.0.2.2:3000',
+);
 
 /// Provides a configured Dio instance with auth token injection.
 final apiClientProvider = Provider<Dio>((ref) {
