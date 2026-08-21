@@ -170,6 +170,16 @@ export class PrismaOrderRepository implements OrderRepository {
     return this.attachLocations(orders);
   }
 
+  async findAll(filter?: { status?: string }): Promise<OrderRecord[]> {
+    const where = filter?.status ? { status: filter.status } : {};
+    const orders = await prisma.order.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      include: { pricing: true },
+    });
+    return this.attachLocations(orders);
+  }
+
   async update(id: string, patch: Partial<OrderRecord>): Promise<OrderRecord> {
     // Update order fields
     const orderData: Record<string, unknown> = {};

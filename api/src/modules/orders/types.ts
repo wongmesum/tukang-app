@@ -56,5 +56,6 @@ export interface OrderRepository {
   findIncoming(workerId: string): Promise<OrderRecord[]>;
   findActive(workerId: string): Promise<OrderRecord[]>;
   findHistory(workerId: string): Promise<OrderRecord[]>;
+  findAll(filter?: { status?: string }): Promise<OrderRecord[]>;
   update(id: string, patch: Partial<OrderRecord>): Promise<OrderRecord>;
 }

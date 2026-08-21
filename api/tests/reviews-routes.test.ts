@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import app from "../src/index";
 import { generateTokenPair } from "../src/modules/auth/jwt";
 import { userRepo } from "../src/modules/users/repository";
+import { workerRepo } from "../src/modules/workers/repository";
 
 async function createUserAuth(role: "customer" | "worker") {
   const user = await userRepo.create({
@@ -10,6 +11,21 @@ async function createUserAuth(role: "customer" | "worker") {
     role,
   });
   const tokens = generateTokenPair({ userId: user.id, role: user.role });
+
+  // Create worker profile if role is worker (needed for rating recalculation)
+  if (role === "worker") {
+    await workerRepo.create({
+      userId: user.id,
+      ktpNumber: `320${Date.now().toString().slice(-10)}1234`,
+      ktpPhotoUrl: "https://example.com/ktp.jpg",
+      bio: "Test worker",
+      workRadiusKm: 20,
+      homeLocation: { lat: -7.4722, lng: 112.4336 },
+      skills: ["AC"],
+    });
+    await workerRepo.update(user.id, { status: "active", isAvailable: true });
+  }
+
   return { user, auth: `Bearer ${tokens.token}` };
 }
 

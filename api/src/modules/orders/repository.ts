@@ -79,6 +79,14 @@ export class InMemoryOrderRepository implements OrderRepository {
     orders.set(id, updated);
     return updated;
   }
+
+  async findAll(filter?: { status?: string }): Promise<OrderRecord[]> {
+    let result = [...orders.values()];
+    if (filter?.status) {
+      result = result.filter((o) => o.status === filter.status);
+    }
+    return result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
 }
 
 import { shouldUsePrisma } from "../../shared/repository-factory";

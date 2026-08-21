@@ -3,6 +3,7 @@ import { authMiddleware } from "../../shared/auth-middleware";
 import { orderRepo } from "../orders/repository";
 import { transitionOrder } from "../orders/state-machine";
 import { reviewRepo } from "./repository";
+import { workerRepo } from "../workers/repository";
 import { createReviewSchema } from "./schema";
 import type { ReviewRecord } from "./types";
 
@@ -100,6 +101,16 @@ reviewsRouter.post("/orders/:id/review", async (context) => {
     rating: parsed.data.rating,
     comment: parsed.data.comment ?? null,
     photos: parsed.data.photos,
+  });
+
+  // Recalculate worker's average rating
+  const allReviews = await reviewRepo.findByWorkerId(order.workerId);
+  const newAvg = allReviews.length > 0
+    ? Math.round((allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length) * 10) / 10
+    : 0;
+  await workerRepo.update(order.workerId, {
+    ratingAvg: newAvg,
+    totalOrders: allReviews.length,
   });
 
   const nextStatus = transitionOrder(order.status, "REVIEWED");

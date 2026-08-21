@@ -34,6 +34,8 @@ export interface UpdateWorkerProfileInput {
   skills?: string[];
   isAvailable?: boolean;
   status?: WorkerStatus;
+  ratingAvg?: number;
+  totalOrders?: number;
 }
 
 export interface WorkerProfileRepository {

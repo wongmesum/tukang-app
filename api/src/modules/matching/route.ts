@@ -3,11 +3,26 @@ import { authMiddleware } from "../../shared/auth-middleware";
 import { orderRepo } from "../orders/repository";
 import { transitionOrder } from "../orders/state-machine";
 import { workerRepo } from "../workers/repository";
+import { serviceRepo } from "../services/repository";
 import { rankCandidates } from "./matcher";
 import type { MatchCandidate } from "./matcher";
+import { emitOrderTransition } from "../realtime/order-events";
+import { sendOrderNotification } from "../notifications/order-notifications";
+import type { OrderStatus } from "../orders/state-machine";
 
 const matchingRouter = new Hono();
 matchingRouter.use("/matching/*", authMiddleware);
+
+/**
+ * Resolve category code from a service ID.
+ * Uses the service repository (DB lookup) instead of parsing the ID string.
+ */
+async function resolveCategoryCode(serviceId: string): Promise<string> {
+  const service = await serviceRepo.findServiceById(serviceId);
+  if (service) return service.categoryCode;
+  // Fallback: try parsing the seed-format ID (e.g. "seed-AC-cuci-ac-split")
+  return serviceId.split("-")[1] ?? "";
+}
 
 // POST /matching/find — find candidates for an order (does not assign)
 matchingRouter.post("/matching/find", async (context) => {
@@ -28,8 +43,8 @@ matchingRouter.post("/matching/find", async (context) => {
     );
   }
 
-  // Derive category from service_id (e.g. "seed-AC-cuci-ac-split" → "AC")
-  const categoryCode = order.serviceId.split("-")[1] ?? "";
+  // Derive category from service_id via DB lookup
+  const categoryCode = await resolveCategoryCode(order.serviceId);
 
   const allWorkers = await workerRepo.findAll();
   const candidates = rankCandidates({
@@ -81,7 +96,7 @@ matchingRouter.post("/matching/assign", async (context) => {
     );
   }
 
-  const categoryCode = order.serviceId.split("-")[1] ?? "";
+  const categoryCode = await resolveCategoryCode(order.serviceId);
   const allWorkers = await workerRepo.findAll();
   const candidates = rankCandidates({
     categoryCode,
@@ -112,10 +127,30 @@ matchingRouter.post("/matching/assign", async (context) => {
   }
 
   // Transition PENDING → MATCHED
+  const previousStatus = order.status;
   const nextStatus = transitionOrder(order.status, "MATCHED");
   const updated = await orderRepo.update(order.id, {
     status: nextStatus,
     workerId: selectedWorkerId,
+  });
+
+  // Emit real-time event and push notification
+  emitOrderTransition(previousStatus as OrderStatus, updated.status as OrderStatus, {
+    id: updated.id,
+    orderNumber: updated.orderNumber,
+    customerId: updated.customerId,
+    workerId: updated.workerId,
+    serviceId: updated.serviceId,
+    pricingScheme: updated.pricingScheme,
+    estimatedDuration: updated.estimatedDuration,
+    totalEstimate: updated.pricing.totalEstimate,
+    customerLocation: updated.customerLocation,
+  });
+  sendOrderNotification(updated.status as OrderStatus, {
+    orderId: updated.id,
+    orderNumber: updated.orderNumber,
+    customerId: updated.customerId,
+    workerId: updated.workerId,
   });
 
   const chosen = candidates.find((c) => c.workerId === selectedWorkerId);

@@ -4,7 +4,33 @@ import { requireRole } from "../../shared/role-middleware";
 import { orderRepo } from "./repository";
 import { cancelOrderSchema, createOrderSchema, rejectOrderSchema } from "./schema";
 import { transitionOrder } from "./state-machine";
+import type { OrderStatus } from "./state-machine";
 import type { OrderRecord } from "./types";
+import { emitOrderTransition } from "../realtime/order-events";
+import { sendOrderNotification } from "../notifications/order-notifications";
+
+/**
+ * After a successful order status transition, emit real-time events and push notifications.
+ */
+function notifyTransition(previousStatus: OrderStatus, order: OrderRecord): void {
+  emitOrderTransition(previousStatus, order.status as OrderStatus, {
+    id: order.id,
+    orderNumber: order.orderNumber,
+    customerId: order.customerId,
+    workerId: order.workerId,
+    serviceId: order.serviceId,
+    pricingScheme: order.pricingScheme,
+    estimatedDuration: order.estimatedDuration,
+    totalEstimate: order.pricing.totalEstimate,
+    customerLocation: order.customerLocation,
+  });
+  sendOrderNotification(order.status as OrderStatus, {
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    customerId: order.customerId,
+    workerId: order.workerId,
+  });
+}
 
 function formatOrder(order: OrderRecord) {
   return {
@@ -146,6 +172,7 @@ ordersRouter.post("/orders/:id/cancel", async (context) => {
         error: {
           code: "VALIDATION_ERROR",
           message: "Alasan pembatalan wajib diisi",
+          details: parsed.error.flatten().fieldErrors,
         },
       },
       400,
@@ -171,7 +198,14 @@ ordersRouter.post("/orders/:id/cancel", async (context) => {
 
   try {
     const nextStatus = transitionOrder(order.status, "CANCELLED_BY_CUSTOMER");
-    const updated = await orderRepo.update(id, { status: nextStatus });
+    const cancelReason = `[${parsed.data.reason_code}] ${parsed.data.reason_detail ?? ""}`.trim();
+    const updated = await orderRepo.update(id, {
+      status: nextStatus,
+      description: order.description
+        ? `${order.description}\n---\nAlasan batal: ${cancelReason}`
+        : `Alasan batal: ${cancelReason}`,
+    });
+    notifyTransition(order.status, updated);
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(
@@ -185,6 +219,49 @@ ordersRouter.post("/orders/:id/cancel", async (context) => {
       409,
     );
   }
+});
+
+// POST /orders/:id/reschedule (customer reschedule)
+ordersRouter.post("/orders/:id/reschedule", async (context) => {
+  const authUser = context.get("user");
+  const id = context.req.param("id");
+  if (!id) {
+    return context.json(
+      { success: false, error: { code: "VALIDATION_ERROR", message: "ID order wajib diisi" } },
+      400,
+    );
+  }
+
+  const body = await context.req.json() as { scheduled_at?: string };
+  if (!body.scheduled_at) {
+    return context.json(
+      { success: false, error: { code: "VALIDATION_ERROR", message: "scheduled_at wajib diisi" } },
+      400,
+    );
+  }
+
+  const order = await orderRepo.findById(id);
+  if (!order || order.customerId !== authUser.userId) {
+    return context.json(
+      { success: false, error: { code: "NOT_FOUND", message: "Order tidak ditemukan" } },
+      404,
+    );
+  }
+
+  // Can only reschedule if not yet started
+  const allowedStatuses = ["PENDING", "MATCHED", "ACCEPTED"];
+  if (!allowedStatuses.includes(order.status)) {
+    return context.json(
+      { success: false, error: { code: "CONFLICT", message: "Order tidak dapat dijadwal ulang pada status saat ini" } },
+      409,
+    );
+  }
+
+  const updated = await orderRepo.update(id, {
+    scheduledAt: new Date(body.scheduled_at),
+  });
+
+  return context.json({ success: true, data: formatOrder(updated) });
 });
 
 // --- Worker endpoints ---
@@ -253,17 +330,21 @@ ordersRouter.post("/worker/orders/:id/accept", requireRole("worker"), async (con
     // worker accepting a pending order performs the MATCHED transition.
     let currentOrder = order;
     if (currentOrder.status === "PENDING") {
+      const prevStatus = currentOrder.status;
       currentOrder = await orderRepo.update(id, {
         status: transitionOrder(currentOrder.status, "MATCHED"),
         workerId: authUser.userId,
       });
+      notifyTransition(prevStatus, currentOrder);
     }
 
+    const prevStatus = currentOrder.status;
     const nextStatus = transitionOrder(currentOrder.status, "ACCEPTED");
     const updated = await orderRepo.update(id, {
       status: nextStatus,
       workerId: authUser.userId,
     });
+    notifyTransition(prevStatus, updated);
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(
@@ -356,6 +437,7 @@ ordersRouter.post("/worker/orders/:id/enroute", requireRole("worker"), async (co
   try {
     const nextStatus = transitionOrder(order.status, "EN_ROUTE");
     const updated = await orderRepo.update(id, { status: nextStatus });
+    notifyTransition(order.status, updated);
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(
@@ -393,6 +475,7 @@ ordersRouter.post("/worker/orders/:id/arrive", requireRole("worker"), async (con
   try {
     const nextStatus = transitionOrder(order.status, "ARRIVED");
     const updated = await orderRepo.update(id, { status: nextStatus });
+    notifyTransition(order.status, updated);
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(
@@ -433,6 +516,7 @@ ordersRouter.post("/worker/orders/:id/start", requireRole("worker"), async (cont
       status: nextStatus,
       startedAt: new Date(),
     });
+    notifyTransition(order.status, updated);
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(
@@ -478,6 +562,7 @@ ordersRouter.post("/worker/orders/:id/complete", requireRole("worker"), async (c
         totalFinal: order.pricing.totalEstimate,
       },
     });
+    notifyTransition(order.status, updated);
     return context.json({ success: true, data: formatOrder(updated) });
   } catch {
     return context.json(

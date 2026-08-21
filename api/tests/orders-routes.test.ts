@@ -207,7 +207,7 @@ describe("orders routes", () => {
     const cancelRes = await app.request(`/v1/orders/${created.data.id}/cancel`, {
       method: "POST",
       headers: { Authorization: auth, "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: "Berubah pikiran" }),
+      body: JSON.stringify({ reason_code: "changed_mind", reason_detail: "Berubah pikiran" }),
     });
 
     expect(cancelRes.status).toBe(200);

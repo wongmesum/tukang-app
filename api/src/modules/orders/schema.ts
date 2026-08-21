@@ -32,7 +32,17 @@ export const rejectOrderSchema = z.object({
 });
 
 export const cancelOrderSchema = z.object({
-  reason: z.string().min(1).max(500),
+  reason_code: z.enum([
+    "changed_mind",
+    "wrong_service",
+    "wrong_schedule",
+    "found_other",
+    "price_too_high",
+    "emergency",
+    "worker_too_far",
+    "other",
+  ]),
+  reason_detail: z.string().max(500).optional(),
 });
 
 export type CreateOrderRequest = z.infer<typeof createOrderSchema>;
