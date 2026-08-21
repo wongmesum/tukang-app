@@ -7,6 +7,10 @@ on:
         description: "Backend URL, without /v1"
         required: false
         type: string
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/build-apk.yml"
   push:
     branches:
       - master
