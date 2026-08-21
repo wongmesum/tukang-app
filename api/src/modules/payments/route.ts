@@ -7,6 +7,8 @@ import { paymentRepo } from "./repository";
 import { orderRepo } from "../orders/repository";
 import { transitionOrder } from "../orders/state-machine";
 import { walletRepo } from "../workers/repository";
+import { sendOrderNotification } from "../notifications/order-notifications";
+import type { OrderStatus } from "../orders/state-machine";
 
 async function creditWorkerOnPayment(orderId: string) {
   const order = await orderRepo.findById(orderId);
@@ -21,18 +23,10 @@ async function creditWorkerOnPayment(orderId: string) {
   );
 }
 import { createQrisSchema, simulatePaidSchema, webhookSchema } from "./schema";
+import { getPaymentProvider } from "./providers";
 import type { PaymentRecord } from "./types";
 
 const QRIS_EXPIRY_MINUTES = 15;
-
-function generateQrString(paymentId: string, amount: number): string {
-  // Stub QRIS string — in production this comes from Midtrans/Xendit API
-  return `000201010211${paymentId.slice(0, 12)}520400005303360${amount}6304ABCD`;
-}
-
-function generateQrImageUrl(paymentId: string): string {
-  return `https://cdn.tukangndeso.id/qr/${paymentId}.png`;
-}
 
 function formatPayment(payment: PaymentRecord) {
   return {
@@ -81,9 +75,11 @@ paymentsRouter.post("/payments/qris/create", authMiddleware, async (context) => 
     );
   }
 
-  // Check if there's already a pending payment for this order
+  // Check if there's already a pending (non-expired) payment for this order
   const existingPayments = await paymentRepo.findByOrderId(order.id);
-  const pendingPayment = existingPayments.find((p) => p.status === "pending");
+  const pendingPayment = existingPayments.find(
+    (p) => p.status === "pending" && (!p.expiresAt || p.expiresAt.getTime() > Date.now()),
+  );
   if (pendingPayment) {
     return context.json({ success: true, data: formatPayment(pendingPayment) });
   }
@@ -99,10 +95,16 @@ paymentsRouter.post("/payments/qris/create", authMiddleware, async (context) => 
     expiresAt,
   });
 
-  // Generate QR after we have payment id
-  const qrString = generateQrString(payment.id, payment.amount);
-  const qrImageUrl = generateQrImageUrl(payment.id);
-  const updated = await paymentRepo.markQrData(payment.id, qrString, qrImageUrl);
+  // Generate QR via payment provider (Midtrans or stub)
+  const provider = getPaymentProvider();
+  const qrResult = await provider.createQris({
+    paymentId: payment.id,
+    amount: payment.amount,
+    orderId: order.id,
+    description: `Order ${order.orderNumber ?? order.id}`,
+    expiryMinutes: QRIS_EXPIRY_MINUTES,
+  });
+  const updated = await paymentRepo.markQrData(payment.id, qrResult.qrString, qrResult.qrImageUrl);
 
   return context.json({ success: true, data: formatPayment(updated) });
 });
@@ -125,7 +127,14 @@ paymentsRouter.get("/payments/:id/status", authMiddleware, async (context) => {
     );
   }
 
-  return context.json({ success: true, data: formatPayment(payment) });
+  // Check if payment has expired
+  const isExpired = payment.status === "pending" && payment.expiresAt && payment.expiresAt.getTime() < Date.now();
+  const responseData = {
+    ...formatPayment(payment),
+    is_expired: isExpired,
+  };
+
+  return context.json({ success: true, data: responseData });
 });
 
 // POST /payments/webhook/qris (no auth — called by payment provider)
@@ -180,6 +189,14 @@ paymentsRouter.post("/payments/webhook/qris", async (context) => {
     return context.json({ success: true, data: formatPayment(payment) });
   }
 
+  // Reject payment on expired QR
+  if (payment.expiresAt && payment.expiresAt.getTime() < Date.now()) {
+    return context.json(
+      { success: false, error: { code: "CONFLICT", message: "QRIS sudah kedaluwarsa. Silakan buat ulang." } },
+      409,
+    );
+  }
+
   if (status === "paid") {
     const updated = await paymentRepo.markPaid(payment_id, reference);
 
@@ -189,6 +206,12 @@ paymentsRouter.post("/payments/webhook/qris", async (context) => {
       const nextStatus = transitionOrder(order.status, "PAID");
       await orderRepo.update(order.id, { status: nextStatus });
       await creditWorkerOnPayment(order.id);
+      sendOrderNotification(nextStatus as OrderStatus, {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        customerId: order.customerId,
+        workerId: order.workerId,
+      });
     }
 
     return context.json({ success: true, data: formatPayment(updated) });
@@ -236,6 +259,12 @@ paymentsRouter.post("/payments/simulate-paid", authMiddleware, async (context) =
     const nextStatus = transitionOrder(order.status, "PAID");
     await orderRepo.update(order.id, { status: nextStatus });
     await creditWorkerOnPayment(order.id);
+    sendOrderNotification(nextStatus as OrderStatus, {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      customerId: order.customerId,
+      workerId: order.workerId,
+    });
   }
 
   return context.json({ success: true, data: formatPayment(updated) });

@@ -17,6 +17,14 @@ import { matchingRouter } from "./modules/matching/route";
 import { adminRouter } from "./modules/admin/route";
 import { devRouter } from "./modules/dev/route";
 import { seedRouter } from "./modules/dev/seed";
+import { uploadRouter } from "./modules/upload/route";
+import { realtimeRouter } from "./modules/realtime/route";
+import { chatRouter } from "./modules/chat/route";
+import { notificationsRouter } from "./modules/notifications/route";
+import { favoritesRouter } from "./modules/favorites/route";
+import { promosRouter } from "./modules/promos/route";
+import { referralsRouter } from "./modules/referrals/route";
+import { settingsRouter } from "./modules/settings/route";
 
 const app = new Hono();
 
@@ -62,6 +70,9 @@ app.get("/health", async (context) => {
   });
 });
 
+// Static file serving for uploads (handled in server.ts for Bun runtime)
+// In test mode this is a no-op
+
 // Mount routes
 app.route("/v1/pricing", pricingRouter);
 app.route("/v1/auth", authRouter);
@@ -72,31 +83,16 @@ app.route("/v1", paymentsRouter);
 app.route("/v1", reviewsRouter);
 app.route("/v1", workersRouter);
 app.route("/v1", matchingRouter);
+app.route("/v1", uploadRouter);
+app.route("/v1", realtimeRouter);
+app.route("/v1", chatRouter);
+app.route("/v1", notificationsRouter);
+app.route("/v1", favoritesRouter);
+app.route("/v1", promosRouter);
+app.route("/v1", referralsRouter);
 app.route("/v1/admin", adminRouter);
+app.route("/v1/admin/settings", settingsRouter);
 app.route("/dev", devRouter);
 app.route("/dev/seed", seedRouter);
 
 export default app;
-
-if (import.meta.main) {
-  const port = Number(process.env.PORT ?? 3000);
-  const server = Bun.serve({
-    port,
-    fetch: app.fetch,
-  });
-
-  // eslint-disable-next-line no-console
-  console.log(`API running on http://localhost:${port}`);
-
-  // Graceful shutdown
-  const shutdown = async (signal: string) => {
-    // eslint-disable-next-line no-console
-    console.log(`\n[${signal}] Shutting down gracefully...`);
-    server.stop();
-    await prisma.$disconnect();
-    process.exit(0);
-  };
-
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
-}

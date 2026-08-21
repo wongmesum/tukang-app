@@ -7,7 +7,8 @@ import { otpLimiter } from "../../shared/rate-limit";
 import { authMiddleware } from "../../shared/auth-middleware";
 import { userRepo } from "../users/repository";
 import { otpStore } from "./otp-store";
-import { isTokenRevoked, revokeToken } from "./token-revocation";
+import { isTokenRevokedAsync, revokeToken } from "./token-revocation";
+import { getOtpProvider } from "./providers";
 
 const OTP_EXPIRY_SECONDS = env.OTP_EXPIRY_SECONDS;
 const OTP_MAX_ATTEMPTS = env.OTP_MAX_ATTEMPTS;
@@ -44,12 +45,9 @@ authRouter.post("/otp/request", otpLimiter, async (context) => {
     attempts: 0,
   });
 
-  // TODO: send OTP via SMS/WhatsApp gateway
-  // In development, log to console (never do this in production — OTP must not appear in logs)
-  if (env.NODE_ENV === "development") {
-    // eslint-disable-next-line no-console
-    console.log(`[DEV] OTP for ${phone}: ${code}`);
-  }
+  // Send OTP via WhatsApp (Fonnte) or console log in dev
+  const otpProvider = getOtpProvider();
+  await otpProvider.send(phone, code);
 
   return context.json({
     success: true,
@@ -265,7 +263,7 @@ authRouter.post("/refresh", async (context) => {
     );
   }
 
-  if (isTokenRevoked(parsed.data.refresh_token)) {
+  if (await isTokenRevokedAsync(parsed.data.refresh_token)) {
     return context.json(
       {
         success: false,
