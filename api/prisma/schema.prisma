@@ -258,3 +258,15 @@ model WalletTransaction {
 
   @@map("wallet_transactions")
 }
+
+model ChatMessage {
+  id         String   @id @default(uuid())
+  orderId    String   @map("order_id")
+  senderId   String   @map("sender_id")
+  senderRole String   @map("sender_role") @db.VarChar(10)
+  content    String
+  sentAt     DateTime @default(now()) @map("sent_at")
+
+  @@index([orderId, sentAt])
+  @@map("chat_messages")
+}
