@@ -22,6 +22,22 @@ import '../features/worker/worker_dashboard_screen.dart';
 import '../features/worker/worker_wallet_screen.dart';
 import '../features/worker/worker_active_order_screen.dart';
 import '../features/worker/incoming_order_screen.dart';
+import '../features/info/about_screen.dart';
+import '../features/info/area_screen.dart';
+import '../features/info/news_screen.dart';
+import '../features/info/blog_screen.dart';
+import '../features/info/career_screen.dart';
+import '../features/info/services_info_screen.dart';
+import '../features/info/contact_screen.dart';
+import '../features/info/customer_service_screen.dart';
+import '../features/info/privacy_policy_screen.dart';
+import '../features/info/terms_screen.dart';
+import '../features/info/help_screen.dart';
+import '../features/onboarding/onboarding_screen.dart';
+import '../features/address/address_picker_screen.dart';
+import '../features/profile/edit_profile_screen.dart';
+import '../features/notifications/notification_center_screen.dart';
+import '../features/booking/cancel_order_screen.dart';
 
 import 'main_shell.dart';
 
@@ -43,6 +59,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/', builder: (context, state) => const SplashScreen()),
+      GoRoute(path: '/onboarding', builder: (context, state) => const OnboardingScreen()),
       GoRoute(
         path: '/landing',
         builder: (context, state) => const LandingScreen(),
@@ -130,6 +147,28 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/worker/orders/:id',
         builder: (context, state) => WorkerActiveOrderScreen(orderId: state.pathParameters['id'] ?? ''),
+      ),
+
+      // Info pages
+      GoRoute(path: '/info/about', builder: (context, state) => const AboutScreen()),
+      GoRoute(path: '/info/area', builder: (context, state) => const AreaScreen()),
+      GoRoute(path: '/info/news', builder: (context, state) => const NewsScreen()),
+      GoRoute(path: '/info/blog', builder: (context, state) => const BlogScreen()),
+      GoRoute(path: '/info/career', builder: (context, state) => const CareerScreen()),
+      GoRoute(path: '/info/services', builder: (context, state) => const ServicesInfoScreen()),
+      GoRoute(path: '/info/contact', builder: (context, state) => const ContactScreen()),
+      GoRoute(path: '/info/cs', builder: (context, state) => const CustomerServiceScreen()),
+      GoRoute(path: '/info/privacy', builder: (context, state) => const PrivacyPolicyScreen()),
+      GoRoute(path: '/info/terms', builder: (context, state) => const TermsScreen()),
+      GoRoute(path: '/info/help', builder: (context, state) => const HelpScreen()),
+
+      // Utility pages
+      GoRoute(path: '/address/pick', builder: (context, state) => const AddressPickerScreen()),
+      GoRoute(path: '/profile/edit', builder: (context, state) => const EditProfileScreen()),
+      GoRoute(path: '/notifications', builder: (context, state) => const NotificationCenterScreen()),
+      GoRoute(
+        path: '/orders/:id/cancel',
+        builder: (context, state) => CancelOrderScreen(orderId: state.pathParameters['id'] ?? ''),
       ),
     ],
   );
