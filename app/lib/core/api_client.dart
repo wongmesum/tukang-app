@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'auth_state.dart';
 
@@ -72,5 +73,88 @@ class ApiError {
       code: (err['code'] as String?) ?? 'UNKNOWN',
       message: (err['message'] as String?) ?? 'Terjadi kesalahan',
     );
+  }
+}
+
+/// Compatibility client for legacy screens that have not yet migrated to
+/// Riverpod's [apiClientProvider].
+class ApiClient {
+  ApiClient._()
+      : _dio = Dio(
+          BaseOptions(
+            baseUrl:
+                '${kApiBaseUrl.replaceFirst(RegExp(r'/\$'), '')}/v1',
+            connectTimeout: const Duration(seconds: 10),
+            receiveTimeout: const Duration(seconds: 15),
+            contentType: 'application/json',
+            responseType: ResponseType.json,
+          ),
+        );
+
+  static final ApiClient instance = ApiClient._();
+  static const FlutterSecureStorage _storage = FlutterSecureStorage();
+  static const String _tokenKey = 'tukangndeso_token';
+
+  final Dio _dio;
+
+  Future<Options> _options() async {
+    final token = await _storage.read(key: _tokenKey);
+    return Options(
+      headers: {
+        if (token != null && token.isNotEmpty)
+          'Authorization': 'Bearer $token',
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>?> get(String path) async {
+    final response = await _dio.get<dynamic>(
+      path,
+      options: await _options(),
+    );
+    return _unwrap(response.data);
+  }
+
+  Future<Map<String, dynamic>?> post(
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
+    final response = await _dio.post<dynamic>(
+      path,
+      data: body,
+      options: await _options(),
+    );
+    return _unwrap(response.data);
+  }
+
+  Future<Map<String, dynamic>?> patch(
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
+    final response = await _dio.patch<dynamic>(
+      path,
+      data: body,
+      options: await _options(),
+    );
+    return _unwrap(response.data);
+  }
+
+  Map<String, dynamic>? _unwrap(dynamic responseBody) {
+    if (responseBody is! Map<String, dynamic>) {
+      return null;
+    }
+
+    if (responseBody['success'] == false) {
+      final error = responseBody['error'];
+      final message = error is Map<String, dynamic>
+          ? error['message']?.toString()
+          : null;
+      throw Exception(message ?? 'Permintaan API gagal');
+    }
+
+    final data = responseBody['data'];
+    if (data == null) return null;
+    if (data is Map<String, dynamic>) return data;
+    return {'value': data};
   }
 }
