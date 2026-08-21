@@ -90,7 +90,7 @@ ThemeData buildAppTheme() {
         borderSide: const BorderSide(color: AppColors.primary, width: 2),
       ),
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       elevation: 0,
       color: Colors.white,
       shape: RoundedRectangleBorder(
