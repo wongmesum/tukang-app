@@ -82,8 +82,9 @@ class ApiClient {
   ApiClient._()
       : _dio = Dio(
           BaseOptions(
-            baseUrl:
-                '${kApiBaseUrl.replaceFirst(RegExp(r'/\$'), '')}/v1',
+            baseUrl: kApiBaseUrl.endsWith('/')
+                ? '${kApiBaseUrl}v1'
+                : '$kApiBaseUrl/v1',
             connectTimeout: const Duration(seconds: 10),
             receiveTimeout: const Duration(seconds: 15),
             contentType: 'application/json',
