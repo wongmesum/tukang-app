@@ -146,7 +146,7 @@ export default function WorkersPage() {
             </thead>
             <tbody className="divide-y">
               {workers.map((worker) => (
-                <tr key={worker.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/workers/${worker.user_id}`)}>
+                <tr key={worker.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/workers/detail?id=${encodeURIComponent(worker.user_id)}`)}>
                   <td className="px-4 py-3 text-sm font-medium text-primary">{worker.name}</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{worker.phone}</td>
                   <td className="px-4 py-3 text-sm">
