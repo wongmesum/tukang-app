@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { Hono } from "hono";
 import { adminMiddleware } from "../../shared/admin-middleware";
 import { authMiddleware } from "../../shared/auth-middleware";
@@ -146,29 +146,70 @@ paymentsRouter.get("/payments/:id/status", authMiddleware, async (context) => {
 
 // POST /payments/webhook/qris (no auth — called by payment provider)
 paymentsRouter.post("/payments/webhook/qris", async (context) => {
-  const body = await context.req.json();
-  const parsed = webhookSchema.safeParse(body);
+  const body = await context.req.json() as Record<string, unknown>;
+  const settings = getQrisSettings();
+  let payment_id: string;
+  let status: "paid" | "expired" | "failed";
+  let reference: string;
+  let signature: string;
+  let expectedSignature: string;
 
-  if (!parsed.success) {
-    return context.json(
-      { success: false, error: { code: "VALIDATION_ERROR", message: "Webhook payload tidak valid" } },
-      400,
-    );
+  // Midtrans sends order_id/status_code/gross_amount/signature_key.
+  if (typeof body.signature_key === "string") {
+    const orderId = body.order_id;
+    const statusCode = body.status_code;
+    const grossAmount = body.gross_amount;
+    const transactionStatus = body.transaction_status;
+    if (
+      typeof orderId !== "string" ||
+      typeof statusCode !== "string" ||
+      typeof grossAmount !== "string" ||
+      typeof transactionStatus !== "string" ||
+      !settings.serverKey
+    ) {
+      return context.json(
+        { success: false, error: { code: "VALIDATION_ERROR", message: "Webhook Midtrans tidak valid" } },
+        400,
+      );
+    }
+    payment_id = orderId;
+    reference = typeof body.transaction_id === "string" ? body.transaction_id : orderId;
+    signature = body.signature_key;
+    expectedSignature = createHash("sha512")
+      .update(`${orderId}${statusCode}${grossAmount}${settings.serverKey}`)
+      .digest("hex");
+    status = ["settlement", "capture"].includes(transactionStatus)
+      ? "paid"
+      : transactionStatus === "expire"
+        ? "expired"
+        : "failed";
+  } else {
+    const parsed = webhookSchema.safeParse(body);
+    if (!parsed.success) {
+      return context.json(
+        { success: false, error: { code: "VALIDATION_ERROR", message: "Webhook payload tidak valid" } },
+        400,
+      );
+    }
+    ({ payment_id, status, reference } = parsed.data);
+    signature = parsed.data.signature ?? "";
+    if (!settings.webhookSecret) {
+      return context.json(
+        { success: false, error: { code: "FORBIDDEN", message: "Webhook secret belum dikonfigurasi" } },
+        403,
+      );
+    }
+    expectedSignature = createHmac("sha256", settings.webhookSecret)
+      .update(`${payment_id}:${status}:${reference}`)
+      .digest("hex");
   }
 
-  // Webhook signature verification
-  const { payment_id, status, reference, signature } = parsed.data;
-
-  const webhookSecret = getQrisSettings().webhookSecret;
-  if (!signature || !webhookSecret) {
+  if (!signature) {
     return context.json(
       { success: false, error: { code: "FORBIDDEN", message: "Signature missing" } },
       403,
     );
   }
-
-  const payload = `${payment_id}:${status}:${reference}`;
-  const expectedSignature = createHmac("sha256", webhookSecret).update(payload).digest("hex");
 
   const providedBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expectedSignature);
@@ -308,4 +349,3 @@ paymentsRouter.post("/payments/:id/refund", adminMiddleware, async (context) => 
 });
 
 export { paymentsRouter };
-
