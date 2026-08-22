@@ -129,7 +129,7 @@ export default function OrdersPage() {
             </thead>
             <tbody className="divide-y">
               {orders.map((order) => (
-                <tr key={order.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/orders/${order.id}`)}>
+                <tr key={order.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/orders/detail?id=${encodeURIComponent(order.id)}`)}>
                   <td className="px-4 py-3 text-sm font-mono text-primary">{order.order_number}</td>
                   <td className="px-4 py-3 text-sm">{order.service_id.split("-").slice(1, 3).join(" ")}</td>
                   <td className="px-4 py-3 text-sm capitalize">{order.pricing_scheme}</td>

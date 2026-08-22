@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 interface WorkerDetail {
@@ -63,9 +63,9 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export default function WorkerDetailPage() {
-  const params = useParams();
-  const workerId = params.id as string;
+function WorkerDetailContent() {
+  const searchParams = useSearchParams();
+  const workerId = searchParams.get("id") ?? "";
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
@@ -253,5 +253,13 @@ export default function WorkerDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function WorkerDetailPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-12 text-gray-500">Memuat...</div>}>
+      <WorkerDetailContent />
+    </Suspense>
   );
 }

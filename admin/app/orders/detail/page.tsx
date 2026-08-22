@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 interface OrderDetail {
@@ -92,9 +92,9 @@ function StatusTimeline({ currentStatus }: { currentStatus: string }) {
   );
 }
 
-export default function OrderDetailPage() {
-  const params = useParams();
-  const orderId = params.id as string;
+function OrderDetailContent() {
+  const searchParams = useSearchParams();
+  const orderId = searchParams.get("id") ?? "";
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -280,5 +280,13 @@ export default function OrderDetailPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function OrderDetailPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-12 text-gray-500">Memuat...</div>}>
+      <OrderDetailContent />
+    </Suspense>
   );
 }
