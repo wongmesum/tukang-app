@@ -1,0 +1,64 @@
+name: Package cPanel API
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "api/**"
+      - ".github/workflows/package-cpanel-api.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "api/**"
+      - ".github/workflows/package-cpanel-api.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpanel-api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Build Node.js API package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm install
+
+      - name: Generate Prisma client
+        working-directory: api
+        run: npx prisma generate
+
+      - name: Build Node.js bundle
+        working-directory: api
+        run: npm run build:node
+
+      - name: Assemble cPanel package
+        run: |
+          mkdir -p package/uploads
+          cp api/app.js api/package.json api/package-lock.json package/
+          cp -R api/dist api/prisma package/
+          cd package
+          zip -r ../TukangNDeso-cPanel-API.zip .
+
+      - name: Upload cPanel package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TukangNDeso-cPanel-API
+          path: TukangNDeso-cPanel-API.zip
+          if-no-files-found: error
+          retention-days: 14
