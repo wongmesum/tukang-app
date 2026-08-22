@@ -39,7 +39,9 @@ if (env.NODE_ENV !== "test") {
 app.get("/health", async (context) => {
   let dbStatus = "unknown";
 
-  if (env.NODE_ENV !== "test") {
+  if (env.REPOSITORY_MODE === "memory") {
+    dbStatus = "memory";
+  } else if (env.NODE_ENV !== "test") {
     try {
       await Promise.race([
         prisma.$queryRaw`SELECT 1`,
