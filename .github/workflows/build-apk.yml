@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      API_BASE_URL: ${{ inputs.api_base_url || vars.API_BASE_URL || 'http://10.0.2.2:3000' }}
+      API_BASE_URL: ${{ inputs.api_base_url || vars.API_BASE_URL || 'https://geje.tech' }}
 
     steps:
       - name: Check out repository
