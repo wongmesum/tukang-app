@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { redis } from "../../shared/redis";
+import { getRedisClient } from "../../shared/redis";
 import { env } from "../../config/env";
 
 const FALLBACK_REVOCATION_SECONDS = 24 * 60 * 60;
@@ -23,10 +23,10 @@ function getTokenTtlSeconds(token: string): number {
 export function revokeToken(token: string): void {
   const ttlSeconds = getTokenTtlSeconds(token);
 
-  if (redis && env.NODE_ENV !== "test") {
+  if (getRedisClient() && env.NODE_ENV !== "test") {
     // Fire-and-forget Redis SET with TTL
     const key = `${REVOKED_KEY_PREFIX}${hashToken(token)}`;
-    redis.set(key, "1", "EX", ttlSeconds).catch(() => {
+    getRedisClient()!.set(key, "1", "EX", ttlSeconds).catch(() => {
       // Fallback to memory if Redis fails
       revokedTokensMap.set(token, Date.now() + ttlSeconds * 1000);
     });
@@ -67,13 +67,13 @@ export async function isTokenRevokedAsync(token: string): Promise<boolean> {
   }
 
   // Check Redis if available
-  if (redis && env.NODE_ENV !== "test") {
+  if (getRedisClient() && env.NODE_ENV !== "test") {
     try {
       const key = `${REVOKED_KEY_PREFIX}${hashToken(token)}`;
-      const exists = await redis.exists(key);
+      const exists = await getRedisClient()!.exists(key);
       if (exists) {
         // Cache in memory for subsequent sync checks this request
-        const ttl = await redis.ttl(key);
+        const ttl = await getRedisClient()!.ttl(key);
         revokedTokensMap.set(token, Date.now() + ttl * 1000);
         return true;
       }
@@ -96,3 +96,4 @@ export function clearRevokedTokens(): void {
 function hashToken(token: string): string {
   return token.slice(-32);
 }
+

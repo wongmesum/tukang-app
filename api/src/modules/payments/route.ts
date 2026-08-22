@@ -25,8 +25,7 @@ async function creditWorkerOnPayment(orderId: string) {
 import { createQrisSchema, simulatePaidSchema, webhookSchema } from "./schema";
 import { getPaymentProvider } from "./providers";
 import type { PaymentRecord } from "./types";
-
-const QRIS_EXPIRY_MINUTES = 15;
+import { getQrisSettings } from "../settings/config-store";
 
 function formatPayment(payment: PaymentRecord) {
   return {
@@ -65,6 +64,14 @@ paymentsRouter.post("/payments/qris/create", authMiddleware, async (context) => 
     );
   }
 
+  const qrisSettings = getQrisSettings();
+  if (!qrisSettings.enabled) {
+    return context.json(
+      { success: false, error: { code: "QRIS_DISABLED", message: "Pembayaran QRIS sedang dinonaktifkan" } },
+      503,
+    );
+  }
+
   const authUser = context.get("user");
   const order = await orderRepo.findById(parsed.data.order_id);
 
@@ -84,7 +91,7 @@ paymentsRouter.post("/payments/qris/create", authMiddleware, async (context) => 
     return context.json({ success: true, data: formatPayment(pendingPayment) });
   }
 
-  const expiresAt = new Date(Date.now() + QRIS_EXPIRY_MINUTES * 60 * 1000);
+  const expiresAt = new Date(Date.now() + qrisSettings.expiryMinutes * 60 * 1000);
 
   const payment = await paymentRepo.create({
     orderId: order.id,
@@ -102,7 +109,7 @@ paymentsRouter.post("/payments/qris/create", authMiddleware, async (context) => 
     amount: payment.amount,
     orderId: order.id,
     description: `Order ${order.orderNumber ?? order.id}`,
-    expiryMinutes: QRIS_EXPIRY_MINUTES,
+    expiryMinutes: qrisSettings.expiryMinutes,
   });
   const updated = await paymentRepo.markQrData(payment.id, qrResult.qrString, qrResult.qrImageUrl);
 
@@ -152,7 +159,8 @@ paymentsRouter.post("/payments/webhook/qris", async (context) => {
   // Webhook signature verification
   const { payment_id, status, reference, signature } = parsed.data;
 
-  if (!signature || !env.QRIS_WEBHOOK_SECRET) {
+  const webhookSecret = getQrisSettings().webhookSecret;
+  if (!signature || !webhookSecret) {
     return context.json(
       { success: false, error: { code: "FORBIDDEN", message: "Signature missing" } },
       403,
@@ -160,7 +168,7 @@ paymentsRouter.post("/payments/webhook/qris", async (context) => {
   }
 
   const payload = `${payment_id}:${status}:${reference}`;
-  const expectedSignature = createHmac("sha256", env.QRIS_WEBHOOK_SECRET).update(payload).digest("hex");
+  const expectedSignature = createHmac("sha256", webhookSecret).update(payload).digest("hex");
 
   const providedBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expectedSignature);
@@ -300,3 +308,4 @@ paymentsRouter.post("/payments/:id/refund", adminMiddleware, async (context) => 
 });
 
 export { paymentsRouter };
+

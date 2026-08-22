@@ -27,6 +27,24 @@ export class PrismaUserRepository implements UserRepository {
     };
   }
 
+  async findByEmail(email: string): Promise<UserRecord | null> {
+    const user = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
+    });
+    if (!user) return null;
+    return {
+      id: user.id,
+      phone: user.phone,
+      name: user.name,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      role: user.role,
+      isVerified: user.isVerified,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
   async findById(id: string): Promise<UserRecord | null> {
     const user = await prisma.user.findUnique({ where: { id } });
     if (!user) return null;
@@ -227,3 +245,4 @@ export class PrismaAddressRepository implements AddressRepository {
     await prisma.$executeRaw`UPDATE addresses SET is_default = false WHERE user_id = ${userId}`;
   }
 }
+

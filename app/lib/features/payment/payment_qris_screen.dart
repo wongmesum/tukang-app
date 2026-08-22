@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
+import '../../core/runtime_config.dart';
 import '../../core/theme.dart';
 
 class PaymentQrisScreen extends ConsumerStatefulWidget {
@@ -22,7 +23,21 @@ class _PaymentQrisScreenState extends ConsumerState<PaymentQrisScreen> {
   @override
   void initState() {
     super.initState();
-    _generateQris();
+    _loadAndGenerate();
+  }
+
+  Future<void> _loadAndGenerate() async {
+    final config = await RuntimeConfig.load();
+    if (!config.qrisEnabled) {
+      if (mounted) {
+        setState(() {
+          _error = 'Pembayaran QRIS sedang dinonaktifkan oleh admin.';
+          _loading = false;
+        });
+      }
+      return;
+    }
+    await _generateQris();
   }
 
   Future<void> _generateQris() async {
@@ -109,3 +124,4 @@ class _PaymentQrisScreenState extends ConsumerState<PaymentQrisScreen> {
     );
   }
 }
+
