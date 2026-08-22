@@ -1,0 +1,59 @@
+name: Build Customer Web
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/build-customer-web.yml"
+  push:
+    branches:
+      - master
+      - codex/deploy-customer-web
+    paths:
+      - "app/**"
+      - ".github/workflows/build-customer-web.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-web:
+    name: Flutter customer web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      API_BASE_URL: ${{ vars.API_BASE_URL || 'https://geje.tech' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate web platform files when missing
+        working-directory: app
+        run: |
+          if [ ! -d web ]; then
+            flutter create --platforms=web --project-name tukangndeso .
+          fi
+
+      - name: Install Flutter dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build customer web
+        working-directory: app
+        run: flutter build web --release --dart-define=API_BASE_URL="$API_BASE_URL"
+
+      - name: Upload customer web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TukangNDeso-Web
+          path: app/build/web
+          if-no-files-found: error
+          retention-days: 14
