@@ -1,5 +1,7 @@
 name: Deploy Admin to GitHub Pages
 
+# Public GitHub Pages deployment for the TukangNDeso admin panel.
+
 on:
   workflow_dispatch:
     inputs:
