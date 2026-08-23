@@ -1,179 +1,178 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import { adminMiddleware } from "../../shared/admin-middleware";
+import { getRedisClient, reconfigureRedis } from "../../shared/redis";
 import {
-  getSettings,
-  getRedisSettings,
+  getGoogleAuthSettings,
+  getOtpSettings,
   getQrisSettings,
-  updateRedisSettings,
+  getRedisSettings,
+  maskRedisUrl,
+  maskSecret,
+  updateGoogleAuthSettings,
+  updateOtpSettings,
   updateQrisSettings,
+  updateRedisSettings,
 } from "./config-store";
-import { redis } from "../../shared/redis";
 
 const settingsRouter = new Hono();
 settingsRouter.use("*", adminMiddleware);
 
-// GET /admin/settings — get all settings
-settingsRouter.get("/", async (context) => {
-  const settings = getSettings();
-
-  // Mask sensitive keys (show only last 4 chars)
-  const maskedQris = {
-    ...settings.qris,
-    serverKey: settings.qris.serverKey ? `****${settings.qris.serverKey.slice(-4)}` : "",
-    clientKey: settings.qris.clientKey ? `****${settings.qris.clientKey.slice(-4)}` : "",
-    webhookSecret: settings.qris.webhookSecret ? `****${settings.qris.webhookSecret.slice(-4)}` : "",
-  };
-
-  return context.json({
-    success: true,
-    data: {
-      redis: {
-        ...settings.redis,
-        status: redis ? "connected" : "not_connected",
-      },
-      qris: maskedQris,
-    },
-  });
+const redisSchema = z.object({
+  url: z.string().min(1).optional(),
+  enabled: z.boolean().optional(),
 });
 
-// GET /admin/settings/redis — get Redis settings + live status
-settingsRouter.get("/redis", async (context) => {
-  const redisSettings = getRedisSettings();
-
-  let status = "not_configured";
-  let latencyMs: number | null = null;
-
-  if (redis) {
-    try {
-      const start = Date.now();
-      await redis.ping();
-      latencyMs = Date.now() - start;
-      status = "connected";
-    } catch {
-      status = "error";
-    }
-  } else if (redisSettings.enabled) {
-    status = "disconnected";
-  }
-
-  return context.json({
-    success: true,
-    data: {
-      url: redisSettings.url,
-      enabled: redisSettings.enabled,
-      status,
-      latency_ms: latencyMs,
-    },
-  });
+const qrisSchema = z.object({
+  enabled: z.boolean().optional(),
+  provider: z.literal("midtrans").optional(),
+  is_production: z.boolean().optional(),
+  server_key: z.string().min(1).optional(),
+  client_key: z.string().min(1).optional(),
+  webhook_secret: z.string().min(16).optional(),
+  merchant_id: z.string().optional(),
+  expiry_minutes: z.number().int().min(5).max(60).optional(),
 });
 
-// PUT /admin/settings/redis — update Redis settings
-settingsRouter.put("/redis", async (context) => {
-  const body = await context.req.json() as {
-    url?: string;
-    enabled?: boolean;
-  };
-
-  const updated = updateRedisSettings({
-    ...(body.url !== undefined && { url: body.url }),
-    ...(body.enabled !== undefined && { enabled: body.enabled }),
-  });
-
-  return context.json({
-    success: true,
-    data: {
-      ...updated,
-      message: "Konfigurasi Redis berhasil diperbarui. Restart server untuk menerapkan koneksi baru.",
-    },
-  });
+const otpSchema = z.object({
+  enabled: z.boolean().optional(),
+  provider: z.enum(["fonnte", "console"]).optional(),
+  api_token: z.string().min(1).optional(),
+  expiry_seconds: z.number().int().min(60).max(900).optional(),
+  max_attempts: z.number().int().min(1).max(10).optional(),
+  message_template: z.string().min(10).max(500).optional(),
 });
 
-// GET /admin/settings/qris — get QRIS settings
-settingsRouter.get("/qris", async (context) => {
+const googleSchema = z.object({
+  enabled: z.boolean().optional(),
+  web_client_id: z.string().optional(),
+  android_client_id: z.string().optional(),
+  ios_client_id: z.string().optional(),
+});
+
+function publicAdminSettings() {
+  const redis = getRedisSettings();
   const qris = getQrisSettings();
-
-  return context.json({
-    success: true,
-    data: {
+  const otp = getOtpSettings();
+  const google = getGoogleAuthSettings();
+  return {
+    redis: {
+      enabled: redis.enabled,
+      url: maskRedisUrl(redis.url),
+      configured: Boolean(redis.url),
+      status: getRedisClient() ? "connected" : redis.enabled ? "disconnected" : "disabled",
+    },
+    qris: {
+      enabled: qris.enabled,
       provider: qris.provider,
       is_production: qris.isProduction,
-      server_key: qris.serverKey ? `****${qris.serverKey.slice(-4)}` : "",
-      client_key: qris.clientKey ? `****${qris.clientKey.slice(-4)}` : "",
-      webhook_secret: qris.webhookSecret ? `****${qris.webhookSecret.slice(-4)}` : "",
+      server_key: maskSecret(qris.serverKey),
+      client_key: maskSecret(qris.clientKey),
+      webhook_secret: maskSecret(qris.webhookSecret),
       merchant_id: qris.merchantId,
       expiry_minutes: qris.expiryMinutes,
     },
-  });
-});
-
-// PUT /admin/settings/qris — update QRIS settings
-settingsRouter.put("/qris", async (context) => {
-  const body = await context.req.json() as {
-    provider?: string;
-    is_production?: boolean;
-    server_key?: string;
-    client_key?: string;
-    webhook_secret?: string;
-    merchant_id?: string;
-    expiry_minutes?: number;
+    otp: {
+      enabled: otp.enabled,
+      provider: otp.provider,
+      api_token: maskSecret(otp.apiToken),
+      expiry_seconds: otp.expirySeconds,
+      max_attempts: otp.maxAttempts,
+      message_template: otp.messageTemplate,
+    },
+    google_auth: {
+      enabled: google.enabled,
+      web_client_id: google.webClientId,
+      android_client_id: google.androidClientId,
+      ios_client_id: google.iosClientId,
+    },
   };
+}
 
-  const patch: Record<string, unknown> = {};
-  if (body.provider && ["midtrans", "xendit", "dana"].includes(body.provider)) {
-    patch.provider = body.provider;
+settingsRouter.get("/", (context) =>
+  context.json({ success: true, data: publicAdminSettings() }),
+);
+
+settingsRouter.put("/redis", async (context) => {
+  const parsed = redisSchema.safeParse(await context.req.json());
+  if (!parsed.success) {
+    return context.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Konfigurasi Redis tidak valid" } }, 400);
   }
-  if (body.is_production !== undefined) patch.isProduction = body.is_production;
-  if (body.server_key) patch.serverKey = body.server_key;
-  if (body.client_key) patch.clientKey = body.client_key;
-  if (body.webhook_secret) patch.webhookSecret = body.webhook_secret;
-  if (body.merchant_id !== undefined) patch.merchantId = body.merchant_id;
-  if (body.expiry_minutes !== undefined) patch.expiryMinutes = body.expiry_minutes;
-
-  const updated = updateQrisSettings(patch as Parameters<typeof updateQrisSettings>[0]);
-
+  const updated = updateRedisSettings(parsed.data);
+  const client = await reconfigureRedis(updated);
   return context.json({
     success: true,
     data: {
-      provider: updated.provider,
-      is_production: updated.isProduction,
-      merchant_id: updated.merchantId,
-      expiry_minutes: updated.expiryMinutes,
-      message: "Konfigurasi QRIS berhasil diperbarui.",
+      enabled: updated.enabled,
+      status: client ? "connected" : updated.enabled ? "disconnected" : "disabled",
+      message: "Konfigurasi Redis diterapkan tanpa restart server.",
     },
   });
 });
 
-// POST /admin/settings/redis/test — test Redis connection
 settingsRouter.post("/redis/test", async (context) => {
+  const redis = getRedisClient() ?? await reconfigureRedis();
   if (!redis) {
-    return context.json({
-      success: false,
-      error: { code: "SERVICE_UNAVAILABLE", message: "Redis client tidak aktif. Aktifkan dulu dan restart server." },
-    }, 503);
+    return context.json({ success: false, error: { code: "SERVICE_UNAVAILABLE", message: "Redis tidak dapat dihubungi" } }, 503);
   }
-
   try {
     const start = Date.now();
-    const pong = await redis.ping();
-    const latency = Date.now() - start;
-
-    return context.json({
-      success: true,
-      data: {
-        status: "ok",
-        response: pong,
-        latency_ms: latency,
-      },
-    });
-  } catch (err) {
-    return context.json({
-      success: false,
-      error: {
-        code: "CONNECTION_FAILED",
-        message: err instanceof Error ? err.message : "Redis tidak dapat dihubungi",
-      },
-    }, 503);
+    await redis.ping();
+    return context.json({ success: true, data: { status: "ok", latency_ms: Date.now() - start } });
+  } catch (error) {
+    return context.json({ success: false, error: { code: "CONNECTION_FAILED", message: error instanceof Error ? error.message : "Redis tidak dapat dihubungi" } }, 503);
   }
+});
+
+settingsRouter.put("/qris", async (context) => {
+  const parsed = qrisSchema.safeParse(await context.req.json());
+  if (!parsed.success) {
+    return context.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Konfigurasi QRIS tidak valid" } }, 400);
+  }
+  const body = parsed.data;
+  const updated = updateQrisSettings({
+    ...(body.enabled !== undefined && { enabled: body.enabled }),
+    ...(body.provider !== undefined && { provider: body.provider }),
+    ...(body.is_production !== undefined && { isProduction: body.is_production }),
+    ...(body.server_key !== undefined && { serverKey: body.server_key }),
+    ...(body.client_key !== undefined && { clientKey: body.client_key }),
+    ...(body.webhook_secret !== undefined && { webhookSecret: body.webhook_secret }),
+    ...(body.merchant_id !== undefined && { merchantId: body.merchant_id }),
+    ...(body.expiry_minutes !== undefined && { expiryMinutes: body.expiry_minutes }),
+  });
+  return context.json({ success: true, data: { enabled: updated.enabled, message: "Konfigurasi QRIS langsung diterapkan." } });
+});
+
+settingsRouter.put("/otp", async (context) => {
+  const parsed = otpSchema.safeParse(await context.req.json());
+  if (!parsed.success) {
+    return context.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Konfigurasi OTP tidak valid" } }, 400);
+  }
+  const body = parsed.data;
+  const updated = updateOtpSettings({
+    ...(body.enabled !== undefined && { enabled: body.enabled }),
+    ...(body.provider !== undefined && { provider: body.provider }),
+    ...(body.api_token !== undefined && { apiToken: body.api_token }),
+    ...(body.expiry_seconds !== undefined && { expirySeconds: body.expiry_seconds }),
+    ...(body.max_attempts !== undefined && { maxAttempts: body.max_attempts }),
+    ...(body.message_template !== undefined && { messageTemplate: body.message_template }),
+  });
+  return context.json({ success: true, data: { enabled: updated.enabled, message: "Konfigurasi OTP langsung diterapkan." } });
+});
+
+settingsRouter.put("/google-auth", async (context) => {
+  const parsed = googleSchema.safeParse(await context.req.json());
+  if (!parsed.success) {
+    return context.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Konfigurasi Google Auth tidak valid" } }, 400);
+  }
+  const body = parsed.data;
+  const updated = updateGoogleAuthSettings({
+    ...(body.enabled !== undefined && { enabled: body.enabled }),
+    ...(body.web_client_id !== undefined && { webClientId: body.web_client_id }),
+    ...(body.android_client_id !== undefined && { androidClientId: body.android_client_id }),
+    ...(body.ios_client_id !== undefined && { iosClientId: body.ios_client_id }),
+  });
+  return context.json({ success: true, data: { enabled: updated.enabled, message: "Google Login langsung diterapkan." } });
 });
 
 export { settingsRouter };

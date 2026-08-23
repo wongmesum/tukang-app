@@ -25,6 +25,8 @@ import { favoritesRouter } from "./modules/favorites/route";
 import { promosRouter } from "./modules/promos/route";
 import { referralsRouter } from "./modules/referrals/route";
 import { settingsRouter } from "./modules/settings/route";
+import { publicConfigRouter } from "./modules/settings/public-route";
+import { googleAuthRouter } from "./modules/auth/google-route";
 
 const app = new Hono();
 
@@ -78,6 +80,8 @@ app.get("/health", async (context) => {
 // Mount routes
 app.route("/v1/pricing", pricingRouter);
 app.route("/v1/auth", authRouter);
+app.route("/v1/auth/google", googleAuthRouter);
+app.route("/v1/config", publicConfigRouter);
 app.route("/v1", usersRouter);
 app.route("/v1", servicesRouter);
 app.route("/v1", ordersRouter);
@@ -98,3 +102,4 @@ app.route("/dev", devRouter);
 app.route("/dev/seed", seedRouter);
 
 export default app;
+

@@ -1,28 +1,26 @@
 import type { PaymentProvider } from "./types";
 import { MidtransProvider } from "./midtrans";
 import { StubProvider } from "./stub";
+import { env } from "../../../config/env";
+import { getQrisSettings } from "../../settings/config-store";
 
-/**
- * Factory to get the active payment provider based on environment.
- * In production with Midtrans keys configured → use Midtrans.
- * Otherwise → use Stub (fake QR for development).
- */
 export function getPaymentProvider(): PaymentProvider {
-  const serverKey = process.env.MIDTRANS_SERVER_KEY;
-  const clientKey = process.env.MIDTRANS_CLIENT_KEY;
-  const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
+  const settings = getQrisSettings();
+  if (!settings.enabled) throw new Error("QRIS_DISABLED");
 
-  if (serverKey && clientKey) {
+  if (settings.serverKey && settings.clientKey) {
     return new MidtransProvider({
-      serverKey,
-      clientKey,
-      isProduction,
+      serverKey: settings.serverKey,
+      clientKey: settings.clientKey,
+      isProduction: settings.isProduction,
     });
   }
 
-  // Fallback to stub
-  const webhookSecret = process.env.QRIS_WEBHOOK_SECRET ?? "dev-secret";
-  return new StubProvider(webhookSecret);
+  if (env.NODE_ENV !== "production") {
+    return new StubProvider(settings.webhookSecret || "dev-secret");
+  }
+
+  throw new Error("QRIS_PROVIDER_NOT_CONFIGURED");
 }
 
 export type { PaymentProvider, QrisCreateResult } from "./types";

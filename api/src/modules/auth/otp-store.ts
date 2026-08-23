@@ -1,5 +1,5 @@
 import type { StoredOtpRecord } from "./otp";
-import { redis } from "../../shared/redis";
+import { getRedisClient } from "../../shared/redis";
 import { env } from "../../config/env";
 
 export interface OtpStore {
@@ -54,9 +54,9 @@ export class ResilientOtpStore implements OtpStore {
 
   async get(phone: string): Promise<StoredOtpRecord | null> {
     // Try Redis
-    if (redis) {
+    if (getRedisClient()) {
       try {
-        const data = await redis.get(`${OTP_KEY_PREFIX}${phone}`);
+        const data = await getRedisClient()!.get(`${OTP_KEY_PREFIX}${phone}`);
         if (data) {
           const parsed = JSON.parse(data) as {
             phone: string;
@@ -84,7 +84,7 @@ export class ResilientOtpStore implements OtpStore {
     await this.memoryFallback.set(phone, record);
 
     // Try Redis (fire-and-forget style, don't throw)
-    if (redis) {
+    if (getRedisClient()) {
       try {
         const ttlSeconds = Math.max(
           1,
@@ -98,7 +98,7 @@ export class ResilientOtpStore implements OtpStore {
           attempts: record.attempts,
         });
 
-        await redis.set(`${OTP_KEY_PREFIX}${phone}`, data, "EX", ttlSeconds);
+        await getRedisClient()!.set(`${OTP_KEY_PREFIX}${phone}`, data, "EX", ttlSeconds);
       } catch {
         // Redis unavailable — memory fallback already has the data
       }
@@ -108,9 +108,9 @@ export class ResilientOtpStore implements OtpStore {
   async delete(phone: string): Promise<void> {
     await this.memoryFallback.delete(phone);
 
-    if (redis) {
+    if (getRedisClient()) {
       try {
-        await redis.del(`${OTP_KEY_PREFIX}${phone}`);
+        await getRedisClient()!.del(`${OTP_KEY_PREFIX}${phone}`);
       } catch {
         // ignore
       }
@@ -129,3 +129,4 @@ function createOtpStore(): OtpStore {
 }
 
 export const otpStore: OtpStore = createOtpStore();
+

@@ -1,8 +1,9 @@
-import { createHmac } from "crypto";
+import { createHash, createHmac } from "crypto";
 import { describe, expect, it } from "vitest";
 import app from "../src/index";
 import { generateTokenPair } from "../src/modules/auth/jwt";
 import { userRepo } from "../src/modules/users/repository";
+import { updateQrisSettings } from "../src/modules/settings/config-store";
 
 const WEBHOOK_TEST_SECRET = "test-webhook-secret-qris-vitest";
 process.env.QRIS_WEBHOOK_SECRET = WEBHOOK_TEST_SECRET;
@@ -214,4 +215,51 @@ describe("payment QRIS routes", () => {
     });
     expect(secondWebhook.status).toBe(200);
   });
+  it("POST /v1/payments/webhook/qris — accepts a valid Midtrans notification", async () => {
+    const { auth, order } = await createCustomerAndOrder();
+    await progressOrderToCompleted(order.id);
+
+    const createRes = await app.request("/v1/payments/qris/create", {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ order_id: order.id }),
+    });
+    const payment = (await createRes.json()).data;
+    const serverKey = "midtrans-test-server-key";
+    const statusCode = "200";
+    const grossAmount = "65000.00";
+    const transactionId = "MIDTRANS-TX-2001";
+
+    updateQrisSettings({ serverKey, clientKey: "" });
+    try {
+      const signatureKey = createHash("sha512")
+        .update(`${payment.payment_id}${statusCode}${grossAmount}${serverKey}`)
+        .digest("hex");
+      const webhookRes = await app.request("/v1/payments/webhook/qris", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_id: payment.payment_id,
+          status_code: statusCode,
+          gross_amount: grossAmount,
+          transaction_status: "settlement",
+          transaction_id: transactionId,
+          signature_key: signatureKey,
+        }),
+      });
+
+      expect(webhookRes.status).toBe(200);
+      const webhookJson = await webhookRes.json();
+      expect(webhookJson.data.status).toBe("paid");
+      expect(webhookJson.data.reference).toBe(transactionId);
+
+      const orderRes = await app.request(`/v1/orders/${order.id}`, {
+        headers: { Authorization: auth },
+      });
+      expect((await orderRes.json()).data.status).toBe("PAID");
+    } finally {
+      updateQrisSettings({ serverKey: "", clientKey: "" });
+    }
+  });
+
 });

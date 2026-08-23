@@ -9,9 +9,7 @@ import { userRepo } from "../users/repository";
 import { otpStore } from "./otp-store";
 import { isTokenRevokedAsync, revokeToken } from "./token-revocation";
 import { getOtpProvider } from "./providers";
-
-const OTP_EXPIRY_SECONDS = env.OTP_EXPIRY_SECONDS;
-const OTP_MAX_ATTEMPTS = env.OTP_MAX_ATTEMPTS;
+import { getOtpSettings } from "../settings/config-store";
 
 const authRouter = new Hono();
 
@@ -34,9 +32,17 @@ authRouter.post("/otp/request", otpLimiter, async (context) => {
     );
   }
 
+  const otpSettings = getOtpSettings();
+  if (!otpSettings.enabled) {
+    return context.json(
+      { success: false, error: { code: "OTP_DISABLED", message: "Login OTP sedang dinonaktifkan" } },
+      503,
+    );
+  }
+
   const { phone } = parsed.data;
   const code = generateOtpCode();
-  const expiresAt = new Date(Date.now() + OTP_EXPIRY_SECONDS * 1000);
+  const expiresAt = new Date(Date.now() + otpSettings.expirySeconds * 1000);
 
   await otpStore.set(phone, {
     phone,
@@ -46,14 +52,29 @@ authRouter.post("/otp/request", otpLimiter, async (context) => {
   });
 
   // Send OTP via WhatsApp (Fonnte) or console log in dev
-  const otpProvider = getOtpProvider();
-  await otpProvider.send(phone, code);
+  try {
+    const otpProvider = getOtpProvider();
+    const sent = await otpProvider.send(phone, code);
+    if (!sent) {
+      await otpStore.delete(phone);
+      return context.json(
+        { success: false, error: { code: "OTP_DELIVERY_FAILED", message: "OTP gagal dikirim. Silakan coba lagi." } },
+        503,
+      );
+    }
+  } catch {
+    await otpStore.delete(phone);
+    return context.json(
+      { success: false, error: { code: "OTP_PROVIDER_NOT_CONFIGURED", message: "Layanan OTP belum dikonfigurasi" } },
+      503,
+    );
+  }
 
   return context.json({
     success: true,
     data: {
       phone,
-      expires_in: OTP_EXPIRY_SECONDS,
+      expires_in: otpSettings.expirySeconds,
       message: "Kode OTP telah dikirim",
       // Dev convenience only — never expose OTP in production response
       ...(env.NODE_ENV === "development" && { dev_otp_code: code }),
@@ -80,6 +101,14 @@ authRouter.post("/otp/verify", otpLimiter, async (context) => {
     );
   }
 
+  const otpSettings = getOtpSettings();
+  if (!otpSettings.enabled) {
+    return context.json(
+      { success: false, error: { code: "OTP_DISABLED", message: "Login OTP sedang dinonaktifkan" } },
+      503,
+    );
+  }
+
   const { phone, code } = parsed.data;
   const record = await otpStore.get(phone);
 
@@ -101,7 +130,7 @@ authRouter.post("/otp/verify", otpLimiter, async (context) => {
       record,
       submittedCode: code,
       now: new Date(),
-      maxAttempts: OTP_MAX_ATTEMPTS,
+      maxAttempts: otpSettings.maxAttempts,
     });
   } catch (error) {
     // Increment attempts on failure and persist back to the store
@@ -377,3 +406,4 @@ authRouter.post("/logout", authMiddleware, async (context) => {
 });
 
 export { authRouter };
+

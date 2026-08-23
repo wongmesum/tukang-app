@@ -59,6 +59,7 @@ export interface UpdateAddressInput {
 
 export interface UserRepository {
   findByPhone(phone: string): Promise<UserRecord | null>;
+  findByEmail(email: string): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
   create(input: CreateUserInput): Promise<UserRecord>;
   update(id: string, input: UpdateUserInput): Promise<UserRecord>;

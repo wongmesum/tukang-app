@@ -10,14 +10,19 @@ import type {
   AddressRepository,
 } from "./types";
 
-// In-memory user store for testing and development without database
 const users = new Map<string, UserRecord>();
 const addresses = new Map<string, AddressRecord>();
 
 export class InMemoryUserRepository implements UserRepository {
   async findByPhone(phone: string): Promise<UserRecord | null> {
+    for (const user of users.values()) if (user.phone === phone) return user;
+    return null;
+  }
+
+  async findByEmail(email: string): Promise<UserRecord | null> {
+    const normalized = email.trim().toLowerCase();
     for (const user of users.values()) {
-      if (user.phone === phone) return user;
+      if (user.email?.toLowerCase() === normalized) return user;
     }
     return null;
   }
@@ -46,12 +51,7 @@ export class InMemoryUserRepository implements UserRepository {
   async update(id: string, input: UpdateUserInput): Promise<UserRecord> {
     const user = users.get(id);
     if (!user) throw new Error("User not found");
-
-    const updated: UserRecord = {
-      ...user,
-      ...input,
-      updatedAt: new Date(),
-    };
+    const updated = { ...user, ...input, updatedAt: new Date() };
     users.set(id, updated);
     return updated;
   }
@@ -59,11 +59,7 @@ export class InMemoryUserRepository implements UserRepository {
 
 export class InMemoryAddressRepository implements AddressRepository {
   async findByUserId(userId: string): Promise<AddressRecord[]> {
-    const result: AddressRecord[] = [];
-    for (const addr of addresses.values()) {
-      if (addr.userId === userId) result.push(addr);
-    }
-    return result;
+    return [...addresses.values()].filter((address) => address.userId === userId);
   }
 
   async findById(id: string): Promise<AddressRecord | null> {
@@ -71,19 +67,15 @@ export class InMemoryAddressRepository implements AddressRepository {
   }
 
   async create(input: CreateAddressInput): Promise<AddressRecord> {
-    const addr: AddressRecord = {
-      id: randomUUID(),
-      ...input,
-    };
-    addresses.set(addr.id, addr);
-    return addr;
+    const address = { id: randomUUID(), ...input };
+    addresses.set(address.id, address);
+    return address;
   }
 
   async update(id: string, input: UpdateAddressInput): Promise<AddressRecord> {
-    const addr = addresses.get(id);
-    if (!addr) throw new Error("Address not found");
-
-    const updated: AddressRecord = { ...addr, ...input };
+    const address = addresses.get(id);
+    if (!address) throw new Error("Address not found");
+    const updated = { ...address, ...input };
     addresses.set(id, updated);
     return updated;
   }
@@ -93,9 +85,9 @@ export class InMemoryAddressRepository implements AddressRepository {
   }
 
   async clearDefaults(userId: string): Promise<void> {
-    for (const [key, addr] of addresses.entries()) {
-      if (addr.userId === userId && addr.isDefault) {
-        addresses.set(key, { ...addr, isDefault: false });
+    for (const [id, address] of addresses.entries()) {
+      if (address.userId === userId && address.isDefault) {
+        addresses.set(id, { ...address, isDefault: false });
       }
     }
   }
@@ -103,8 +95,6 @@ export class InMemoryAddressRepository implements AddressRepository {
 
 import { shouldUsePrisma } from "../../shared/repository-factory";
 import { PrismaAddressRepository, PrismaUserRepository } from "./prisma-repository";
-
-// ... existing code ...
 
 const memoryUserRepo = new InMemoryUserRepository();
 const memoryAddressRepo = new InMemoryAddressRepository();

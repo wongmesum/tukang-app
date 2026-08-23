@@ -1,359 +1,120 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/v1";
-function getToken(): string {
-  return typeof window !== "undefined" ? localStorage.getItem("admin_token") ?? "" : "";
+const token = () => (typeof window === "undefined" ? "" : localStorage.getItem("admin_token") ?? "");
+
+type RedisConfig = { enabled: boolean; url: string; configured: boolean; status: string };
+type QrisConfig = { enabled: boolean; provider: "midtrans"; is_production: boolean; server_key: string; client_key: string; webhook_secret: string; merchant_id: string; expiry_minutes: number };
+type OtpConfig = { enabled: boolean; provider: "fonnte" | "console"; api_token: string; expiry_seconds: number; max_attempts: number; message_template: string };
+type GoogleConfig = { enabled: boolean; web_client_id: string; android_client_id: string; ios_client_id: string };
+type Settings = { redis: RedisConfig; qris: QrisConfig; otp: OtpConfig; google_auth: GoogleConfig };
+
+async function api(path: string, method = "GET", body?: unknown) {
+  const response = await fetch(`${API_BASE}/admin/settings${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token()}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const json = await response.json();
+  if (!json.success) throw new Error(json.error?.message ?? "Permintaan gagal");
+  return json.data;
 }
 
-interface RedisConfig {
-  url: string;
-  enabled: boolean;
-  status: string;
-  latency_ms: number | null;
+function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) {
+  return <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 accent-orange-500"/><span className="text-sm font-medium">{label}</span></label>;
 }
 
-interface QrisConfig {
-  provider: string;
-  is_production: boolean;
-  server_key: string;
-  client_key: string;
-  webhook_secret: string;
-  merchant_id: string;
-  expiry_minutes: number;
+function Field({ label, value, onChange, type = "text", placeholder, min, max }: { label: string; value: string | number; onChange: (value: string) => void; type?: string; placeholder?: string; min?: number; max?: number }) {
+  return <label className="block"><span className="block text-sm font-medium text-gray-700 mb-1">{label}</span><input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} min={min} max={max} className="w-full px-3 py-2 border rounded-lg text-sm"/></label>;
+}
+
+function Card({ title, badge, children }: { title: string; badge?: string; children: ReactNode }) {
+  return <section className="bg-white rounded-xl p-6 shadow-sm border"><div className="flex justify-between items-center mb-4"><h2 className="text-lg font-semibold text-secondary">{title}</h2>{badge && <span className="text-xs px-2 py-1 rounded-full bg-gray-100">{badge}</span>}</div>{children}</section>;
 }
 
 export default function SettingsPage() {
-  const [redis, setRedis] = useState<RedisConfig | null>(null);
-  const [qris, setQris] = useState<QrisConfig | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [testingRedis, setTestingRedis] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-
-  // QRIS form state
-  const [qrisProvider, setQrisProvider] = useState("midtrans");
-  const [qrisProduction, setQrisProduction] = useState(false);
-  const [qrisServerKey, setQrisServerKey] = useState("");
-  const [qrisClientKey, setQrisClientKey] = useState("");
-  const [qrisWebhookSecret, setQrisWebhookSecret] = useState("");
-  const [qrisMerchantId, setQrisMerchantId] = useState("");
-  const [qrisExpiry, setQrisExpiry] = useState(15);
-
-  // Redis form state
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [redisUrl, setRedisUrl] = useState("");
-  const [redisEnabled, setRedisEnabled] = useState(false);
+  const [qrisSecrets, setQrisSecrets] = useState({ server_key: "", client_key: "", webhook_secret: "" });
+  const [otpToken, setOtpToken] = useState("");
 
-  useEffect(() => {
-    fetchSettings();
+  const load = useCallback(async () => {
+    try { setSettings(await api("")); } catch (error) { setNotice({ ok: false, text: error instanceof Error ? error.message : "Gagal memuat" }); }
   }, []);
 
-  async function fetchSettings() {
-    setLoading(true);
-    try {
-      const token = getToken();
-      const res = await fetch(`${API_BASE}/admin/settings`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error?.message);
+  useEffect(() => { void load(); }, [load]);
 
-      const { redis: r, qris: q } = json.data;
-      setRedis(r);
-      setQris(q);
-      setRedisUrl(r.url);
-      setRedisEnabled(r.enabled);
-      setQrisProvider(q.provider);
-      setQrisProduction(q.is_production);
-      setQrisServerKey("");
-      setQrisClientKey("");
-      setQrisWebhookSecret("");
-      setQrisMerchantId(q.merchant_id);
-      setQrisExpiry(q.expiry_minutes);
-    } catch (e) {
-      setMessage({ type: "error", text: e instanceof Error ? e.message : "Gagal memuat" });
-    } finally {
-      setLoading(false);
-    }
+  function patch<K extends keyof Settings>(key: K, value: Partial<Settings[K]>) {
+    setSettings((current) => current ? { ...current, [key]: { ...current[key], ...value } } : current);
   }
 
-  async function saveRedis() {
-    setSaving(true);
-    setMessage(null);
-    try {
-      const token = getToken();
-      const res = await fetch(`${API_BASE}/admin/settings/redis`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ url: redisUrl, enabled: redisEnabled }),
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error?.message);
-      setMessage({ type: "success", text: json.data.message });
-      await fetchSettings();
-    } catch (e) {
-      setMessage({ type: "error", text: e instanceof Error ? e.message : "Gagal" });
-    } finally {
-      setSaving(false);
-    }
+  async function save(path: string, body: unknown, key: string) {
+    setBusy(key); setNotice(null);
+    try { const data = await api(path, "PUT", body); setNotice({ ok: true, text: data.message }); await load(); }
+    catch (error) { setNotice({ ok: false, text: error instanceof Error ? error.message : "Gagal menyimpan" }); }
+    finally { setBusy(""); }
   }
 
-  async function saveQris() {
-    setSaving(true);
-    setMessage(null);
-    try {
-      const token = getToken();
-      const body: Record<string, unknown> = {
-        provider: qrisProvider,
-        is_production: qrisProduction,
-        merchant_id: qrisMerchantId,
-        expiry_minutes: qrisExpiry,
-      };
-      // Only send keys if user typed new values (not empty = keep existing)
-      if (qrisServerKey) body.server_key = qrisServerKey;
-      if (qrisClientKey) body.client_key = qrisClientKey;
-      if (qrisWebhookSecret) body.webhook_secret = qrisWebhookSecret;
+  if (!settings) return <div className="py-12 text-center text-gray-500">Memuat konfigurasi...</div>;
+  const { redis, qris, otp, google_auth: google } = settings;
 
-      const res = await fetch(`${API_BASE}/admin/settings/qris`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error?.message);
-      setMessage({ type: "success", text: json.data.message });
-      setQrisServerKey("");
-      setQrisClientKey("");
-      setQrisWebhookSecret("");
-      await fetchSettings();
-    } catch (e) {
-      setMessage({ type: "error", text: e instanceof Error ? e.message : "Gagal" });
-    } finally {
-      setSaving(false);
-    }
-  }
+  return <div>
+    <h1 className="text-2xl font-bold text-secondary mb-2">Pengaturan Integrasi</h1>
+    <p className="text-sm text-gray-500 mb-6">Perubahan diterapkan backend secara langsung ke web dan APK. Secret tetap tersimpan terenkripsi di server.</p>
+    {notice && <div className={`rounded-lg p-4 mb-6 border ${notice.ok ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"}`}>{notice.text}</div>}
 
-  async function testRedisConnection() {
-    setTestingRedis(true);
-    setMessage(null);
-    try {
-      const token = getToken();
-      const res = await fetch(`${API_BASE}/admin/settings/redis/test`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error?.message);
-      setMessage({ type: "success", text: `Redis OK! Latency: ${json.data.latency_ms}ms` });
-    } catch (e) {
-      setMessage({ type: "error", text: e instanceof Error ? e.message : "Test gagal" });
-    } finally {
-      setTestingRedis(false);
-    }
-  }
-
-  if (loading) return <div className="text-center py-12 text-gray-500">Memuat konfigurasi...</div>;
-
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-secondary mb-6">Pengaturan Sistem</h1>
-
-      {message && (
-        <div className={`rounded-lg p-4 mb-6 ${message.type === "success" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
-          {message.text}
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <Card title="Redis" badge={redis.status}>
+        <p className="text-sm text-gray-500 mb-4">Penyimpanan OTP dan token revocation. URL saat ini: <code>{redis.url || "belum diset"}</code></p>
+        <div className="space-y-4">
+          <Toggle checked={redis.enabled} onChange={(value) => patch("redis", { enabled: value })} label="Aktifkan Redis"/>
+          <Field label="Redis URL baru" value={redisUrl} onChange={setRedisUrl} type="password" placeholder="Kosongkan untuk mempertahankan URL lama"/>
+          <div className="flex gap-2"><button disabled={busy !== ""} onClick={() => void save("/redis", { enabled: redis.enabled, ...(redisUrl ? { url: redisUrl } : {}) }, "redis")} className="flex-1 py-2 bg-primary text-white rounded-lg disabled:opacity-50">Simpan</button><button disabled={busy !== ""} onClick={async () => { setBusy("redis-test"); try { const data = await api("/redis/test", "POST"); setNotice({ ok: true, text: `Redis OK (${data.latency_ms} ms)` }); } catch (error) { setNotice({ ok: false, text: error instanceof Error ? error.message : "Test gagal" }); } finally { setBusy(""); } }} className="px-4 py-2 border rounded-lg">Test</button></div>
         </div>
-      )}
+      </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Redis Settings */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-secondary">Redis</h2>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-              redis?.status === "connected" ? "bg-green-100 text-green-800" :
-              redis?.status === "error" ? "bg-red-100 text-red-800" :
-              "bg-gray-100 text-gray-500"
-            }`}>
-              {redis?.status ?? "unknown"}
-            </span>
-          </div>
-
-          <p className="text-sm text-gray-500 mb-4">
-            Redis digunakan untuk OTP store dan token revocation. Tanpa Redis, data tersimpan di memory (hilang saat restart).
-          </p>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Redis URL</label>
-              <input
-                type="text"
-                value={redisUrl}
-                onChange={(e) => setRedisUrl(e.target.value)}
-                placeholder="redis://localhost:6379"
-                className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={redisEnabled}
-                  onChange={(e) => setRedisEnabled(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full" />
-              </label>
-              <span className="text-sm">Aktifkan Redis</span>
-            </div>
-            {redis?.latency_ms !== null && redis?.latency_ms !== undefined && (
-              <p className="text-xs text-gray-400">Latency: {redis.latency_ms}ms</p>
-            )}
-          </div>
-
-          <div className="flex gap-2 mt-6">
-            <button
-              onClick={saveRedis}
-              disabled={saving}
-              className="flex-1 py-2 bg-primary text-white rounded-lg text-sm hover:bg-orange-600 disabled:opacity-50"
-            >
-              {saving ? "Menyimpan..." : "Simpan"}
-            </button>
-            <button
-              onClick={testRedisConnection}
-              disabled={testingRedis}
-              className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
-            >
-              {testingRedis ? "Testing..." : "Test Koneksi"}
-            </button>
-          </div>
+      <Card title="QRIS Midtrans" badge={qris.is_production ? "PRODUCTION" : "SANDBOX"}>
+        <div className="space-y-4">
+          <Toggle checked={qris.enabled} onChange={(value) => patch("qris", { enabled: value })} label="Aktifkan pembayaran QRIS"/>
+          <Toggle checked={qris.is_production} onChange={(value) => patch("qris", { is_production: value })} label="Mode production (transaksi nyata)"/>
+          <Field label="Merchant ID" value={qris.merchant_id} onChange={(value) => patch("qris", { merchant_id: value })}/>
+          <Field label={`Server Key (${qris.server_key || "belum diset"})`} value={qrisSecrets.server_key} onChange={(value) => setQrisSecrets({ ...qrisSecrets, server_key: value })} type="password" placeholder="Kosongkan untuk mempertahankan"/>
+          <Field label={`Client Key (${qris.client_key || "belum diset"})`} value={qrisSecrets.client_key} onChange={(value) => setQrisSecrets({ ...qrisSecrets, client_key: value })} type="password" placeholder="Kosongkan untuk mempertahankan"/>
+          <Field label={`Webhook Secret (${qris.webhook_secret || "belum diset"})`} value={qrisSecrets.webhook_secret} onChange={(value) => setQrisSecrets({ ...qrisSecrets, webhook_secret: value })} type="password" placeholder="Minimal 16 karakter"/>
+          <Field label="Kedaluwarsa QR (menit)" value={qris.expiry_minutes} onChange={(value) => patch("qris", { expiry_minutes: Number(value) })} type="number" min={5} max={60}/>
+          <button disabled={busy !== ""} onClick={() => void save("/qris", { enabled: qris.enabled, provider: "midtrans", is_production: qris.is_production, merchant_id: qris.merchant_id, expiry_minutes: qris.expiry_minutes, ...Object.fromEntries(Object.entries(qrisSecrets).filter(([, value]) => value)) }, "qris")} className="w-full py-2 bg-primary text-white rounded-lg disabled:opacity-50">Simpan QRIS</button>
         </div>
+      </Card>
 
-        {/* QRIS Settings */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-secondary">QRIS Payment</h2>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-              qris?.is_production ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"
-            }`}>
-              {qris?.is_production ? "PRODUCTION" : "SANDBOX"}
-            </span>
-          </div>
-
-          <p className="text-sm text-gray-500 mb-4">
-            Konfigurasi payment gateway untuk pembayaran QRIS. Mendukung Midtrans, Xendit, dan DANA Bisnis.
-          </p>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
-              <select
-                value={qrisProvider}
-                onChange={(e) => setQrisProvider(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              >
-                <option value="midtrans">Midtrans</option>
-                <option value="xendit">Xendit</option>
-                <option value="dana">DANA Bisnis</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Merchant ID</label>
-              <input
-                type="text"
-                value={qrisMerchantId}
-                onChange={(e) => setQrisMerchantId(e.target.value)}
-                placeholder="M-XXXX"
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Server Key <span className="text-gray-400">(current: {qris?.server_key || "belum diset"})</span>
-              </label>
-              <input
-                type="password"
-                value={qrisServerKey}
-                onChange={(e) => setQrisServerKey(e.target.value)}
-                placeholder="Kosongkan jika tidak ingin mengubah"
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Client Key <span className="text-gray-400">(current: {qris?.client_key || "belum diset"})</span>
-              </label>
-              <input
-                type="password"
-                value={qrisClientKey}
-                onChange={(e) => setQrisClientKey(e.target.value)}
-                placeholder="Kosongkan jika tidak ingin mengubah"
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Webhook Secret <span className="text-gray-400">(current: {qris?.webhook_secret || "belum diset"})</span>
-              </label>
-              <input
-                type="password"
-                value={qrisWebhookSecret}
-                onChange={(e) => setQrisWebhookSecret(e.target.value)}
-                placeholder="Kosongkan jika tidak ingin mengubah"
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">QR Expiry (menit)</label>
-              <input
-                type="number"
-                value={qrisExpiry}
-                onChange={(e) => setQrisExpiry(Number(e.target.value))}
-                min={5}
-                max={60}
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={qrisProduction}
-                  onChange={(e) => setQrisProduction(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-red-300 rounded-full peer peer-checked:bg-red-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full" />
-              </label>
-              <span className="text-sm">Mode Production</span>
-              {qrisProduction && (
-                <span className="text-xs text-red-500 font-medium">⚠️ Transaksi NYATA!</span>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-6">
-            <button
-              onClick={saveQris}
-              disabled={saving}
-              className="w-full py-2 bg-primary text-white rounded-lg text-sm hover:bg-orange-600 disabled:opacity-50"
-            >
-              {saving ? "Menyimpan..." : "Simpan Konfigurasi QRIS"}
-            </button>
-          </div>
+      <Card title="OTP WhatsApp" badge={otp.provider.toUpperCase()}>
+        <div className="space-y-4">
+          <Toggle checked={otp.enabled} onChange={(value) => patch("otp", { enabled: value })} label="Aktifkan login OTP"/>
+          <label className="block"><span className="block text-sm font-medium mb-1">Provider</span><select value={otp.provider} onChange={(e) => patch("otp", { provider: e.target.value as OtpConfig["provider"] })} className="w-full px-3 py-2 border rounded-lg"><option value="fonnte">Fonnte WhatsApp</option><option value="console">Console (development)</option></select></label>
+          <Field label={`API Token (${otp.api_token || "belum diset"})`} value={otpToken} onChange={setOtpToken} type="password" placeholder="Kosongkan untuk mempertahankan"/>
+          <Field label="Masa berlaku (detik)" value={otp.expiry_seconds} onChange={(value) => patch("otp", { expiry_seconds: Number(value) })} type="number" min={60} max={900}/>
+          <Field label="Maksimum percobaan" value={otp.max_attempts} onChange={(value) => patch("otp", { max_attempts: Number(value) })} type="number" min={1} max={10}/>
+          <label className="block"><span className="block text-sm font-medium mb-1">Template pesan</span><textarea value={otp.message_template} onChange={(e) => patch("otp", { message_template: e.target.value })} rows={4} className="w-full px-3 py-2 border rounded-lg text-sm"/><span className="text-xs text-gray-400">Gunakan {"{{code}}"} dan {"{{expiry_minutes}}"}.</span></label>
+          <button disabled={busy !== ""} onClick={() => void save("/otp", { enabled: otp.enabled, provider: otp.provider, expiry_seconds: otp.expiry_seconds, max_attempts: otp.max_attempts, message_template: otp.message_template, ...(otpToken ? { api_token: otpToken } : {}) }, "otp")} className="w-full py-2 bg-primary text-white rounded-lg disabled:opacity-50">Simpan OTP</button>
         </div>
-      </div>
+      </Card>
 
-      {/* Info card */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4">
-        <h3 className="font-medium text-blue-800 mb-2">Catatan Penting</h3>
-        <ul className="text-sm text-blue-700 space-y-1">
-          <li>• Perubahan Redis URL memerlukan restart server untuk berlaku.</li>
-          <li>• Server Key dan Client Key tidak ditampilkan secara penuh demi keamanan.</li>
-          <li>• Kosongkan field key jika tidak ingin mengubah (nilai lama tetap digunakan).</li>
-          <li>• Hati-hati mengaktifkan mode Production — transaksi akan menggunakan uang nyata.</li>
-          <li>• Webhook URL untuk provider: <code className="bg-blue-100 px-1 rounded">https://api.tukangndeso.id/v1/payments/webhook/qris</code></li>
-        </ul>
-      </div>
+      <Card title="Login dengan Google" badge={google.enabled ? "AKTIF" : "NONAKTIF"}>
+        <p className="text-sm text-gray-500 mb-4">ID token Google diverifikasi oleh backend sebelum JWT TukangNDeso diterbitkan.</p>
+        <div className="space-y-4">
+          <Toggle checked={google.enabled} onChange={(value) => patch("google_auth", { enabled: value })} label="Aktifkan Google Login"/>
+          <Field label="Web / Server Client ID" value={google.web_client_id} onChange={(value) => patch("google_auth", { web_client_id: value })} placeholder="...apps.googleusercontent.com"/>
+          <Field label="Android Client ID" value={google.android_client_id} onChange={(value) => patch("google_auth", { android_client_id: value })} placeholder="Opsional tetapi direkomendasikan"/>
+          <Field label="iOS Client ID" value={google.ios_client_id} onChange={(value) => patch("google_auth", { ios_client_id: value })} placeholder="Opsional"/>
+          <button disabled={busy !== ""} onClick={() => void save("/google-auth", google, "google")} className="w-full py-2 bg-primary text-white rounded-lg disabled:opacity-50">Simpan Google Auth</button>
+        </div>
+      </Card>
     </div>
-  );
+
+    <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800"><strong>Webhook QRIS:</strong> <code>https://geje.tech/v1/payments/webhook/qris</code>. Mengaktifkan tombol di sini tidak menggantikan aktivasi merchant di dashboard Midtrans atau pembuatan OAuth Client di Google Cloud.</div>
+  </div>;
 }
