@@ -3,6 +3,7 @@ import { serveStatic } from "hono/bun";
 import { wsHandler, authenticateUpgrade } from "./modules/realtime/ws-handler";
 import { startOrderExpiryJob, stopOrderExpiryJob } from "./modules/orders/expiry";
 import { prisma } from "./shared/prisma";
+import { env } from "./config/env";
 
 // Static file serving for uploads
 app.use("/uploads/*", serveStatic({ root: "./" }));
@@ -35,8 +36,11 @@ console.log(`API running on http://localhost:${port}`);
 // eslint-disable-next-line no-console
 console.log(`WebSocket available at ws://localhost:${port}/v1/realtime?token=<jwt>`);
 
-// Start background jobs
-startOrderExpiryJob();
+// Keep the current cPanel/local behavior by default. Stateless deployments
+// disable this and invoke POST /internal/jobs/expire-orders externally.
+if (env.BACKGROUND_JOBS_ENABLED) {
+  startOrderExpiryJob();
+}
 
 // Graceful shutdown
 const shutdown = async (signal: string) => {
