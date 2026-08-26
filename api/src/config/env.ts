@@ -13,6 +13,7 @@ if (process.env.NODE_ENV === "test" || process.env.VITEST === "true") {
   if (!process.env.DATABASE_URL) process.env.DATABASE_URL = TEST_DEFAULTS.DATABASE_URL;
   if (!process.env.JWT_SECRET) process.env.JWT_SECRET = TEST_DEFAULTS.JWT_SECRET;
   if (!process.env.QRIS_WEBHOOK_SECRET) process.env.QRIS_WEBHOOK_SECRET = "test-webhook-secret-qris-vitest";
+  if (!process.env.INTERNAL_JOB_SECRET) process.env.INTERNAL_JOB_SECRET = "test-internal-job-secret";
 }
 
 const PLACEHOLDER_SECRETS = new Set([
@@ -41,6 +42,11 @@ const envSchema = z.object({
   REDIS_URL: z.string().optional(),
   CDN_BASE_URL: z.string().url().optional(),
   UPLOAD_MAX_SIZE_MB: z.coerce.number().default(5),
+
+  // During migration cPanel/local can keep the legacy interval enabled.
+  // Stateless runtimes should set this to false and trigger internal jobs externally.
+  BACKGROUND_JOBS_ENABLED: z.coerce.boolean().default(true),
+  INTERNAL_JOB_SECRET: z.string().min(16).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -62,6 +68,11 @@ function loadEnv(): Env {
     }
     if (!value.QRIS_WEBHOOK_SECRET) {
       throw new Error("QRIS_WEBHOOK_SECRET must be configured in production");
+    }
+    if (!value.BACKGROUND_JOBS_ENABLED && !value.INTERNAL_JOB_SECRET) {
+      throw new Error(
+        "INTERNAL_JOB_SECRET must be configured when BACKGROUND_JOBS_ENABLED=false in production",
+      );
     }
   }
 
