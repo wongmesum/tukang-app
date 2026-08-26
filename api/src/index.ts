@@ -25,6 +25,7 @@ import { favoritesRouter } from "./modules/favorites/route";
 import { promosRouter } from "./modules/promos/route";
 import { referralsRouter } from "./modules/referrals/route";
 import { settingsRouter } from "./modules/settings/route";
+import { internalJobsRouter } from "./modules/internal/jobs-route";
 
 const app = new Hono();
 
@@ -94,6 +95,7 @@ app.route("/v1", promosRouter);
 app.route("/v1", referralsRouter);
 app.route("/v1/admin", adminRouter);
 app.route("/v1/admin/settings", settingsRouter);
+app.route("/internal/jobs", internalJobsRouter);
 app.route("/dev", devRouter);
 app.route("/dev/seed", seedRouter);
 
