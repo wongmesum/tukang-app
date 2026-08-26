@@ -32,6 +32,9 @@ const booleanFromEnv = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+const optionalUrl = z.preprocess((value) => value === "" ? undefined : value, z.string().url().optional());
+const optionalString = z.preprocess((value) => value === "" ? undefined : value, z.string().optional());
+
 const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -48,8 +51,17 @@ const envSchema = z.object({
   CORS_ORIGINS: z.string().default("http://localhost:3000,http://localhost:3010,http://localhost:5173"),
 
   QRIS_WEBHOOK_SECRET: z.string().min(1).optional(),
-  REDIS_URL: z.string().optional(),
-  CDN_BASE_URL: z.string().url().optional(),
+  REDIS_URL: optionalString,
+
+  // Upload storage. Keep local as the migration-safe default for cPanel/dev.
+  // Wasmer staging/production should use r2.
+  UPLOAD_STORAGE: z.enum(["local", "r2"]).default("local"),
+  S3_ENDPOINT: optionalUrl,
+  S3_BUCKET: optionalString,
+  S3_ACCESS_KEY: optionalString,
+  S3_SECRET_KEY: optionalString,
+  S3_REGION: z.string().default("auto"),
+  CDN_BASE_URL: optionalUrl,
   UPLOAD_MAX_SIZE_MB: z.coerce.number().default(5),
 
   // During migration cPanel/local can keep the legacy interval enabled.
@@ -68,6 +80,20 @@ function loadEnv(): Env {
   }
 
   const value = result.data;
+
+  if (value.UPLOAD_STORAGE === "r2") {
+    const requiredR2 = {
+      S3_ENDPOINT: value.S3_ENDPOINT,
+      S3_BUCKET: value.S3_BUCKET,
+      S3_ACCESS_KEY: value.S3_ACCESS_KEY,
+      S3_SECRET_KEY: value.S3_SECRET_KEY,
+      CDN_BASE_URL: value.CDN_BASE_URL,
+    };
+    const missing = Object.entries(requiredR2).filter(([, configured]) => !configured).map(([key]) => key);
+    if (missing.length > 0) {
+      throw new Error(`R2 upload configuration missing: ${missing.join(", ")}`);
+    }
+  }
 
   if (value.NODE_ENV === "production") {
     if (PLACEHOLDER_SECRETS.has(value.JWT_SECRET) || value.JWT_SECRET.length < 32) {
