@@ -23,6 +23,15 @@ const PLACEHOLDER_SECRETS = new Set([
   "your-secret-here",
 ]);
 
+const booleanFromEnv = z.preprocess((value) => {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off"].includes(normalized)) return false;
+  }
+  return value;
+}, z.boolean());
+
 const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -45,7 +54,7 @@ const envSchema = z.object({
 
   // During migration cPanel/local can keep the legacy interval enabled.
   // Stateless runtimes should set this to false and trigger internal jobs externally.
-  BACKGROUND_JOBS_ENABLED: z.coerce.boolean().default(true),
+  BACKGROUND_JOBS_ENABLED: booleanFromEnv.default(true),
   INTERNAL_JOB_SECRET: z.string().min(16).optional(),
 });
 
