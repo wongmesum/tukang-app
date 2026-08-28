@@ -1,9 +1,6 @@
 import { Hono } from "hono";
 import { authMiddleware } from "../../shared/auth-middleware";
 import { env } from "../../config/env";
-import { randomUUID } from "crypto";
-import { mkdir, writeFile } from "fs/promises";
-import { join, extname } from "path";
 import { putObjectToR2 } from "./r2";
 
 const uploadRouter = new Hono();
@@ -23,10 +20,6 @@ const MIME_TO_EXT: Record<string, string> = {
   "image/heic": ".heic",
   "image/heif": ".heif",
 };
-
-function getUploadDir(): string {
-  return join(process.cwd(), "uploads");
-}
 
 function getLocalPublicUrl(filename: string): string {
   return `${env.CDN_BASE_URL ?? `http://localhost:${env.PORT}`}/uploads/${filename}`;
@@ -86,8 +79,11 @@ uploadRouter.post("/upload/image", authMiddleware, async (context) => {
     return context.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Isi file tidak sesuai dengan tipe yang diklaim. Pastikan file adalah gambar yang valid." } }, 400);
   }
 
-  const ext = MIME_TO_EXT[detectedMime] ?? extname(file.name || ".jpg");
-  const filename = `${randomUUID()}${ext}`;
+  const ext = MIME_TO_EXT[detectedMime];
+  if (!ext) {
+    return context.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Ekstensi file tidak didukung" } }, 400);
+  }
+  const filename = `${crypto.randomUUID()}${ext}`;
 
   if (env.UPLOAD_STORAGE === "r2") {
     const date = new Date();
@@ -107,9 +103,10 @@ uploadRouter.post("/upload/image", authMiddleware, async (context) => {
     });
   }
 
-  const uploadDir = getUploadDir();
-  await mkdir(uploadDir, { recursive: true });
-  await writeFile(join(uploadDir, filename), Buffer.from(buffer));
+  // Loaded only for the cPanel/local fallback so stateless R2 deployments do
+  // not require Node filesystem modules on their normal execution path.
+  const { putObjectLocal } = await import("./local-storage");
+  await putObjectLocal(filename, buffer);
 
   return context.json({
     success: true,
