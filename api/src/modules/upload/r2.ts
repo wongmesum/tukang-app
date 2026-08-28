@@ -1,15 +1,26 @@
-import { createHash, createHmac } from "crypto";
 import { env } from "../../config/env";
 
-function sha256Hex(data: string | ArrayBuffer): string {
-  const hash = createHash("sha256");
-  if (typeof data === "string") hash.update(data);
-  else hash.update(Buffer.from(data));
-  return hash.digest("hex");
+const encoder = new TextEncoder();
+
+function toHex(bytes: ArrayBuffer): string {
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function hmac(key: Buffer | string, data: string): Buffer {
-  return createHmac("sha256", key).update(data).digest();
+async function sha256Hex(data: string | ArrayBuffer): Promise<string> {
+  const input = typeof data === "string" ? encoder.encode(data) : new Uint8Array(data);
+  return toHex(await crypto.subtle.digest("SHA-256", input));
+}
+
+async function hmac(key: Uint8Array | string, data: string): Promise<Uint8Array> {
+  const keyBytes = typeof key === "string" ? encoder.encode(key) : key;
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyBytes,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(data)));
 }
 
 function encodePathSegment(segment: string): string {
@@ -27,15 +38,14 @@ export async function putObjectToR2(key: string, body: ArrayBuffer, contentType:
   const dateStamp = amzDate.slice(0, 8);
   const region = env.S3_REGION || "auto";
   const service = "s3";
-  const payloadHash = sha256Hex(body);
+  const payloadHash = await sha256Hex(body);
   const canonicalUri = `/${encodePathSegment(env.S3_BUCKET)}/${key.split("/").map(encodePathSegment).join("/")}`;
-  const canonicalQueryString = "";
   const canonicalHeaders = `content-type:${contentType}\nhost:${endpoint.host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
   const signedHeaders = "content-type;host;x-amz-content-sha256;x-amz-date";
   const canonicalRequest = [
     "PUT",
     canonicalUri,
-    canonicalQueryString,
+    "",
     canonicalHeaders,
     signedHeaders,
     payloadHash,
@@ -46,14 +56,14 @@ export async function putObjectToR2(key: string, body: ArrayBuffer, contentType:
     "AWS4-HMAC-SHA256",
     amzDate,
     credentialScope,
-    sha256Hex(canonicalRequest),
+    await sha256Hex(canonicalRequest),
   ].join("\n");
 
-  const kDate = hmac(`AWS4${env.S3_SECRET_KEY}`, dateStamp);
-  const kRegion = hmac(kDate, region);
-  const kService = hmac(kRegion, service);
-  const kSigning = hmac(kService, "aws4_request");
-  const signature = createHmac("sha256", kSigning).update(stringToSign).digest("hex");
+  const kDate = await hmac(`AWS4${env.S3_SECRET_KEY}`, dateStamp);
+  const kRegion = await hmac(kDate, region);
+  const kService = await hmac(kRegion, service);
+  const kSigning = await hmac(kService, "aws4_request");
+  const signature = toHex((await hmac(kSigning, stringToSign)).buffer);
 
   const authorization = `AWS4-HMAC-SHA256 Credential=${env.S3_ACCESS_KEY}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
   const target = new URL(canonicalUri, endpoint);
@@ -66,7 +76,7 @@ export async function putObjectToR2(key: string, body: ArrayBuffer, contentType:
       "x-amz-content-sha256": payloadHash,
       "x-amz-date": amzDate,
     },
-    body: Buffer.from(body),
+    body,
   });
 
   if (!response.ok) {
