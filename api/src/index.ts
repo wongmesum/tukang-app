@@ -25,6 +25,8 @@ import { favoritesRouter } from "./modules/favorites/route";
 import { promosRouter } from "./modules/promos/route";
 import { referralsRouter } from "./modules/referrals/route";
 import { settingsRouter } from "./modules/settings/route";
+import { internalJobsRouter } from "./modules/internal/jobs-route";
+import { getRedisHealth } from "./shared/redis";
 
 const app = new Hono();
 
@@ -38,6 +40,7 @@ if (env.NODE_ENV !== "test") {
 
 app.get("/health", async (context) => {
   let dbStatus = "unknown";
+  const redisStatus = await getRedisHealth();
 
   if (env.REPOSITORY_MODE === "memory") {
     dbStatus = "memory";
@@ -62,12 +65,25 @@ app.get("/health", async (context) => {
     dbStatus = "test-mocked";
   }
 
+  if (env.REDIS_REQUIRED && redisStatus !== "connected") {
+    return context.json(
+      {
+        success: false,
+        error: { code: "SERVICE_UNAVAILABLE", message: "Redis tidak dapat diakses" },
+        data: { db_status: dbStatus, redis_status: redisStatus },
+      },
+      503,
+    );
+  }
+
   return context.json({
     success: true,
     data: {
       service: "tukangndeso-api",
       status: "ok",
       db_status: dbStatus,
+      redis_status: redisStatus,
+      deployment_target: env.DEPLOYMENT_TARGET,
     },
   });
 });
@@ -94,6 +110,7 @@ app.route("/v1", promosRouter);
 app.route("/v1", referralsRouter);
 app.route("/v1/admin", adminRouter);
 app.route("/v1/admin/settings", settingsRouter);
+app.route("/internal/jobs", internalJobsRouter);
 app.route("/dev", devRouter);
 app.route("/dev/seed", seedRouter);
 

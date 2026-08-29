@@ -5,7 +5,8 @@
 // repository layer (see src/modules/*/repository.ts).
 
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
+  engineType = "client"
 }
 
 datasource db {

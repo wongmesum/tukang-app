@@ -4,6 +4,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import app from "./index";
 import { startOrderExpiryJob, stopOrderExpiryJob } from "./modules/orders/expiry";
 import { prisma } from "./shared/prisma";
+import { env } from "./config/env";
 
 // Passenger/cPanel runs this Node-compatible entrypoint. WebSocket upgrades are
 // unavailable on shared hosting; clients can use the REST realtime fallback.
@@ -22,7 +23,9 @@ const server = serve(
   },
 );
 
-startOrderExpiryJob();
+if (env.BACKGROUND_JOBS_ENABLED) {
+  startOrderExpiryJob();
+}
 
 const shutdown = async (signal: string) => {
   // eslint-disable-next-line no-console

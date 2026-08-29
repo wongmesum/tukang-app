@@ -1,4 +1,6 @@
 import type { Context, Next } from "hono";
+import { env } from "../config/env";
+import { redis } from "./redis";
 
 interface RateLimitEntry {
   count: number;
@@ -50,6 +52,39 @@ export function createRateLimiter(options: RateLimiterOptions) {
     cleanup(now);
 
     const key = keyFn(context);
+    if (redis) {
+      try {
+        const redisKey = `rate:${windowMs}:${key}`;
+        const count = await redis.incr(redisKey);
+        if (count === 1) {
+          await redis.expire(redisKey, Math.max(1, Math.ceil(windowMs / 1000)));
+        }
+
+        if (count > maxRequests) {
+          const ttlSeconds = await redis.ttl(redisKey);
+          const retryAfterSec = Math.max(1, ttlSeconds);
+          context.header("Retry-After", String(retryAfterSec));
+          return context.json(
+            {
+              success: false,
+              error: {
+                code: "TOO_MANY_REQUESTS",
+                message,
+                retry_after_seconds: retryAfterSec,
+              },
+            },
+            429,
+          );
+        }
+
+        await next();
+        return;
+      } catch (error) {
+        if (env.REDIS_REQUIRED) throw error;
+        // cPanel/dev may continue with the process-local fallback.
+      }
+    }
+
     const entry = store.get(key);
 
     if (!entry || now >= entry.resetAt) {

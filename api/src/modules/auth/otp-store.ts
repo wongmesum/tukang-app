@@ -71,7 +71,8 @@ export class ResilientOtpStore implements OtpStore {
             attempts: parsed.attempts,
           };
         }
-      } catch {
+      } catch (error) {
+        if (env.REDIS_REQUIRED) throw error;
         // Redis unavailable, try memory fallback
       }
     }
@@ -99,7 +100,8 @@ export class ResilientOtpStore implements OtpStore {
         });
 
         await redis.set(`${OTP_KEY_PREFIX}${phone}`, data, "EX", ttlSeconds);
-      } catch {
+      } catch (error) {
+        if (env.REDIS_REQUIRED) throw error;
         // Redis unavailable — memory fallback already has the data
       }
     }
@@ -111,7 +113,8 @@ export class ResilientOtpStore implements OtpStore {
     if (redis) {
       try {
         await redis.del(`${OTP_KEY_PREFIX}${phone}`);
-      } catch {
+      } catch (error) {
+        if (env.REDIS_REQUIRED) throw error;
         // ignore
       }
     }

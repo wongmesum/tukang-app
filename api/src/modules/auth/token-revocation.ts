@@ -20,18 +20,20 @@ function getTokenTtlSeconds(token: string): number {
 
 // --- Public API ---
 
-export function revokeToken(token: string): void {
+export async function revokeToken(token: string): Promise<void> {
   const ttlSeconds = getTokenTtlSeconds(token);
 
+  // Keep a process-local copy for the current instance and as the explicit
+  // cPanel fallback when Redis is optional.
+  revokedTokensMap.set(token, Date.now() + ttlSeconds * 1000);
+
   if (redis && env.NODE_ENV !== "test") {
-    // Fire-and-forget Redis SET with TTL
     const key = `${REVOKED_KEY_PREFIX}${hashToken(token)}`;
-    redis.set(key, "1", "EX", ttlSeconds).catch(() => {
-      // Fallback to memory if Redis fails
-      revokedTokensMap.set(token, Date.now() + ttlSeconds * 1000);
-    });
-  } else {
-    revokedTokensMap.set(token, Date.now() + ttlSeconds * 1000);
+    try {
+      await redis.set(key, "1", "EX", ttlSeconds);
+    } catch (error) {
+      if (env.REDIS_REQUIRED) throw error;
+    }
   }
 }
 
@@ -77,7 +79,8 @@ export async function isTokenRevokedAsync(token: string): Promise<boolean> {
         revokedTokensMap.set(token, Date.now() + ttl * 1000);
         return true;
       }
-    } catch {
+    } catch (error) {
+      if (env.REDIS_REQUIRED) throw error;
       // Redis unavailable — rely on in-memory only
     }
   }
