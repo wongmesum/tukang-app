@@ -2,20 +2,26 @@ import { env } from "../../config/env";
 
 const encoder = new TextEncoder();
 
-function toHex(bytes: ArrayBuffer): string {
+function toHex(bytes: ArrayBufferLike): string {
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 async function sha256Hex(data: string | ArrayBuffer): Promise<string> {
   const input = typeof data === "string" ? encoder.encode(data) : new Uint8Array(data);
-  return toHex(await crypto.subtle.digest("SHA-256", input));
+  return toHex(await crypto.subtle.digest("SHA-256", toArrayBuffer(input)));
 }
 
 async function hmac(key: Uint8Array | string, data: string): Promise<Uint8Array> {
   const keyBytes = typeof key === "string" ? encoder.encode(key) : key;
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    keyBytes,
+    toArrayBuffer(keyBytes),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],

@@ -52,6 +52,13 @@ const envSchema = z.object({
 
   QRIS_WEBHOOK_SECRET: z.string().min(1).optional(),
   REDIS_URL: optionalString,
+  REDIS_DRIVER: z.enum(["ioredis", "rest", "none"]).default("ioredis"),
+  REDIS_REST_URL: optionalUrl,
+  REDIS_REST_TOKEN: optionalString,
+  REDIS_REQUIRED: booleanFromEnv.default(false),
+
+  // Explicit runtime identity keeps cPanel defaults separate from Wasmer.
+  DEPLOYMENT_TARGET: z.enum(["cpanel", "wasmer"]).default("cpanel"),
 
   // Upload storage. Keep local as the migration-safe default for cPanel/dev.
   // Wasmer staging/production should use r2.
@@ -108,6 +115,15 @@ function loadEnv(): Env {
       throw new Error(
         "INTERNAL_JOB_SECRET must be configured when BACKGROUND_JOBS_ENABLED=false in production",
       );
+    }
+    if (value.REDIS_REQUIRED && value.REDIS_DRIVER === "none") {
+      throw new Error("REDIS_DRIVER cannot be none when REDIS_REQUIRED=true");
+    }
+    if (value.REDIS_DRIVER === "rest" && (!value.REDIS_REST_URL || !value.REDIS_REST_TOKEN)) {
+      throw new Error("REDIS_REST_URL and REDIS_REST_TOKEN are required for the REST Redis driver");
+    }
+    if (value.REDIS_REQUIRED && value.REDIS_DRIVER === "ioredis" && !value.REDIS_URL) {
+      throw new Error("REDIS_URL is required for the ioredis driver when Redis is mandatory");
     }
   }
 

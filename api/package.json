@@ -13,7 +13,9 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "build:node": "esbuild src/server-node.ts --bundle --platform=node --format=esm --outfile=dist/server.js --packages=external --alias:@prisma/client=./src/shared/prisma-client-memory.ts",
-    "start:node": "node app.js"
+    "start:node": "node app.js",
+    "build:wasmer": "prisma generate && esbuild src/server-wasmer.ts --bundle --platform=node --format=esm --outfile=dist/wasmer/server.js --packages=external",
+    "start:wasmer": "node dist/wasmer/server.js"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",

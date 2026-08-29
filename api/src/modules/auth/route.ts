@@ -370,8 +370,7 @@ authRouter.post("/logout", authMiddleware, async (context) => {
   }
 
   // Mark both as revoked
-  revokeToken(accessToken);
-  revokeToken(refreshToken);
+  await Promise.all([revokeToken(accessToken), revokeToken(refreshToken)]);
 
   return context.json({ success: true, data: { message: "Berhasil logout" } });
 });

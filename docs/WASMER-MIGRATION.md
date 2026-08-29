@@ -4,11 +4,15 @@ This document tracks a safe migration of the TukangNDeso API away from cPanel wi
 
 ## Current API runtime
 
-The current API is not a drop-in Wasmer Edge workload. It currently depends on:
+The migration branch now has a dedicated Wasmer/Anybuild Node entrypoint. The
+remaining production validation work depends on external staging credentials.
+The cPanel runtime remains separate and unchanged by default.
+
+The API still contains runtime-specific paths that are intentionally isolated:
 
 - Bun (`Bun.serve`) for the primary HTTP/WebSocket server.
-- Prisma with its native query engine.
-- Redis through `ioredis` for OTP, token revocation and rate limiting.
+- Prisma using the pure-JavaScript `pg` driver adapter (`engineType = "client"`).
+- Redis TCP through `ioredis` for cPanel and Redis REST for Wasmer.
 - A long-running order-expiry background job.
 - Local `uploads/` filesystem serving.
 - WebSocket upgrades at `/v1/realtime`.
@@ -48,9 +52,10 @@ External integrations remain configured using secrets/environment variables:
 2. Keep the current database unchanged.
 3. Move all persistent uploads to S3-compatible object storage/CDN.
 4. Keep Redis as an external managed service.
-5. Replace or isolate the long-running order-expiry process so it does not depend on an always-running application instance.
-6. Build a Wasmer-compatible stateless HTTP entrypoint.
-7. Deploy it to a temporary `*.wasmer.app` URL.
+5. Use the protected, idempotent `POST /internal/jobs/expire-orders` endpoint from an external scheduler. **Implemented.**
+6. Build a Wasmer-compatible stateless HTTP entrypoint with the official Anybuild Node/Hono provider. **Implemented.**
+7. Validate build, tests and a local health smoke test in GitHub Actions. **Implemented.**
+8. Deploy it to a temporary `*.wasmer.app` URL. **Pending Wasmer authentication and staging secrets.**
 
 ### Phase 2 - API validation
 
@@ -79,21 +84,30 @@ Only after staging passes:
 
 ## Runtime blockers to resolve
 
-### Bun server
+### Runtime entrypoint
 
-`api/src/server.ts` directly uses `Bun.serve` and Bun WebSocket APIs. A Wasmer-specific HTTP entrypoint must avoid assuming the Bun process model.
+`api/src/server.ts` remains the Bun/WebSocket entrypoint. Wasmer uses
+`api/src/server-wasmer.ts`, a stateless Node/Hono entrypoint bound to
+`0.0.0.0`. `api/Anybuild` follows Wasmer's official Node + Hono provider.
 
 ### Prisma
 
-Prisma normally relies on native runtime components. Confirm a Wasmer/WASIX-compatible database client strategy before enabling production database access. Do not assume the existing Prisma engine binary can run unchanged.
+Prisma is generated with `engineType = "client"` and uses
+`@prisma/adapter-pg`, avoiding the Rust query engine. Staging must still prove
+that the external PostgreSQL endpoint is reachable and correctly secured.
 
 ### Redis
 
-Keep Redis external. Do not run Redis inside an application instance.
+Keep Redis external. cPanel uses the lazily loaded `ioredis` TCP adapter.
+Wasmer requires `REDIS_DRIVER=rest`, `REDIS_REQUIRED=true`, and an
+Upstash-compatible REST URL/token. OTP state, token revocation, and rate limits
+then share Redis across instances. If Redis is unavailable, readiness fails
+instead of silently accepting a per-instance memory fallback.
 
 ### Background jobs
 
-`startOrderExpiryJob()` assumes a long-lived process. Move expiry processing to a scheduled/queue-driven job or make the operation request-driven/idempotent before relying on autoscaled ephemeral instances.
+Wasmer refuses to start when `BACKGROUND_JOBS_ENABLED=true`. Run order expiry
+externally through the protected `POST /internal/jobs/expire-orders` endpoint.
 
 ### Uploads
 
@@ -108,7 +122,8 @@ Treat WebSocket support separately from basic HTTP migration. The existing REST 
 Do not commit production values. Configure these in the Wasmer app secrets/dashboard when the staging app exists:
 
 - `DATABASE_URL`
-- `REDIS_URL`
+- `REDIS_REST_URL`
+- `REDIS_REST_TOKEN`
 - `JWT_SECRET`
 - `MIDTRANS_SERVER_KEY`
 - `MIDTRANS_CLIENT_KEY`
@@ -124,3 +139,18 @@ Do not commit production values. Configure these in the Wasmer app secrets/dashb
 ## Rollback rule
 
 The DNS/API-base-url cutover is the last step, not the first. If any staging validation fails, production continues to use the existing cPanel API.
+
+## Build and staging commands
+
+From `api/`:
+
+```bash
+bun install --frozen-lockfile
+bun run lint
+bun run test
+bun run build:wasmer
+```
+
+The `Anybuild` file is the deployment definition. Deploy only to a temporary
+Wasmer application first, with values from `.env.wasmer.example` stored as
+platform secrets. Do not attach `api.geje.tech` until every Phase 2 check passes.
