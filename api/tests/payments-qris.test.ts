@@ -1,4 +1,4 @@
-import { createHmac } from "crypto";
+import { createHash, createHmac } from "crypto";
 import { describe, expect, it } from "vitest";
 import app from "../src/index";
 import { generateTokenPair } from "../src/modules/auth/jwt";
@@ -214,4 +214,54 @@ describe("payment QRIS routes", () => {
     });
     expect(secondWebhook.status).toBe(200);
   });
+
+  it("POST /v1/payments/webhook/qris — accepts a valid native Midtrans settlement notification", async () => {
+    const { auth, order } = await createCustomerAndOrder();
+    await progressOrderToCompleted(order.id);
+
+    const createRes = await app.request("/v1/payments/qris/create", {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ order_id: order.id }),
+    });
+    const payment = (await createRes.json()).data;
+
+    const serverKey = "SB-Mid-server-test-native-webhook";
+    const statusCode = "200";
+    const grossAmount = String(payment.amount);
+    const signatureKey = createHash("sha512")
+      .update(payment.payment_id + statusCode + grossAmount + serverKey)
+      .digest("hex");
+
+    const previousServerKey = process.env.MIDTRANS_SERVER_KEY;
+    process.env.MIDTRANS_SERVER_KEY = serverKey;
+    try {
+      const webhookRes = await app.request("/v1/payments/webhook/qris", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_id: payment.payment_id,
+          transaction_status: "settlement",
+          status_code: statusCode,
+          gross_amount: grossAmount,
+          signature_key: signatureKey,
+          transaction_id: "midtrans-transaction-1001",
+        }),
+      });
+
+      expect(webhookRes.status).toBe(200);
+      const webhookJson = await webhookRes.json();
+      expect(webhookJson.data.status).toBe("paid");
+      expect(webhookJson.data.reference).toBe("midtrans-transaction-1001");
+
+      const orderRes = await app.request(`/v1/orders/${order.id}`, {
+        headers: { Authorization: auth },
+      });
+      expect((await orderRes.json()).data.status).toBe("PAID");
+    } finally {
+      if (previousServerKey === undefined) delete process.env.MIDTRANS_SERVER_KEY;
+      else process.env.MIDTRANS_SERVER_KEY = previousServerKey;
+    }
+  });
+
 });
