@@ -8,6 +8,7 @@ config = node_config(
     },
     node_build_command = "bun run build:wasmer",
     node_package_manager = "bun",
+    bun_version = "1.3.5",
     node_server = "hono",
     node_version = "24",
 )
