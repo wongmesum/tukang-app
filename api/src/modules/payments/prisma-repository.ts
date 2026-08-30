@@ -1,6 +1,6 @@
 import { prisma } from "../../shared/prisma";
 import type { CreatePaymentInput, PaymentRecord, PaymentRepository } from "./types";
-import type { Payment } from "@prisma/client";
+import type { Payment } from "../../generated/prisma";
 
 function mapToRecord(p: Payment): PaymentRecord {
   return {
