@@ -73,3 +73,37 @@ jobs:
           done
           curl --fail --show-error http://127.0.0.1:8787/health
           grep --fixed-strings '"deployment_target":"wasmer"' /tmp/health.json
+
+
+  production-staging-health:
+    name: Verify production-mode staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify health and disabled dev endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_base="https://tukang-app.wasmer.app"
+
+          curl --fail --silent --show-error "$api_base/health" > /tmp/health.json
+          jq -e '
+            .success == true and
+            .data.status == "ok" and
+            .data.db_status == "connected" and
+            .data.redis_status == "connected" and
+            .data.deployment_target == "wasmer"
+          ' /tmp/health.json > /dev/null
+
+          dev_status="$(curl --silent --output /dev/null --write-out "%{http_code}" "$api_base/dev/admin-token")"
+          test "$dev_status" = "404"
+
+          {
+            echo "Production-mode staging verification passed."
+            echo
+            echo "- Health: ok"
+            echo "- Database: connected"
+            echo "- Redis: connected"
+            echo "- Deployment target: wasmer"
+            echo "- Dev admin endpoint: disabled (404)"
+          } >> "$GITHUB_STEP_SUMMARY"
