@@ -1,6 +1,6 @@
 import { prisma } from "../../shared/prisma";
 import type { CreateReviewInput, ReviewRecord, ReviewRepository } from "./types";
-import type { Review } from "@prisma/client";
+import type { Review } from "../../generated/prisma";
 
 function mapToRecord(r: Review): ReviewRecord {
   return {
