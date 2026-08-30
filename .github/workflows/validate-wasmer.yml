@@ -73,3 +73,39 @@ jobs:
           done
           curl --fail --show-error http://127.0.0.1:8787/health
           grep --fixed-strings '"deployment_target":"wasmer"' /tmp/health.json
+
+
+  r2-staging-smoke:
+    name: Smoke-test staging R2 upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Upload a tiny PNG and verify its public URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_base="https://tukang-app.wasmer.app"
+
+          auth_json="$(curl --fail --silent --show-error "$api_base/dev/admin-token")"
+          token="$(jq -er '.data.token' <<<"$auth_json")"
+
+          printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' | base64 --decode > /tmp/r2-smoke.png
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $token" \
+            -F "file=@/tmp/r2-smoke.png;type=image/png" \
+            "$api_base/v1/upload/image" > /tmp/upload.json
+
+          jq -e '.success == true and .data.storage == "r2" and (.data.url | startswith("https://"))' /tmp/upload.json > /dev/null
+          public_url="$(jq -er '.data.url' /tmp/upload.json)"
+          object_key="$(jq -er '.data.object_key' /tmp/upload.json)"
+
+          curl --fail --silent --show-error --output /dev/null "$public_url"
+
+          {
+            echo "R2 staging smoke test passed."
+            echo
+            echo "- Storage: r2"
+            echo "- Object key: `$object_key`"
+            echo "- Public URL: $public_url"
+          } >> "$GITHUB_STEP_SUMMARY"
