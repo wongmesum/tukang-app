@@ -9,7 +9,7 @@
     "build": "bun build src/index.ts --outdir dist --target bun",
     "test": "bunx vitest run",
     "test:watch": "bunx vitest",
-    "lint": "tsc --noEmit",
+    "lint": "prisma generate && tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
