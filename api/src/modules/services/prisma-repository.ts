@@ -8,7 +8,7 @@ import type {
   UpdateCategoryInput,
   UpdateServiceInput,
 } from "./types";
-import type { ServiceCategory, Service } from "@prisma/client";
+import type { ServiceCategory, Service } from "../../generated/prisma";
 
 function mapCategory(c: ServiceCategory): CategoryRecord {
   return {
