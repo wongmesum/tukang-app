@@ -4,7 +4,7 @@ load("//anybuild/tools:node.bzl", "node_build", "node_config", "node_serve")
 config = node_config(
     schema = 1,
     commands = {
-        "start": "node dist/wasmer/server.js",
+        "start": "node dist/wasmer/server.cjs",
     },
     node_build_command = "bun run build:wasmer",
     node_package_manager = "bun",
