@@ -8,7 +8,7 @@ app_subdir = "api"
 config = node_config(
     schema = 1,
     commands = {
-        "start": "node dist/wasmer/server.js",
+        "start": "node dist/wasmer/server.cjs",
     },
     node_build_command = "bun run build:wasmer",
     node_package_manager = "bun",
