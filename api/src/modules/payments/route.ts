@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { Hono } from "hono";
 import { adminMiddleware } from "../../shared/admin-middleware";
 import { authMiddleware } from "../../shared/auth-middleware";
@@ -22,7 +22,7 @@ async function creditWorkerOnPayment(orderId: string) {
     order.id,
   );
 }
-import { createQrisSchema, simulatePaidSchema, webhookSchema } from "./schema";
+import { createQrisSchema, midtransWebhookSchema, simulatePaidSchema, webhookSchema } from "./schema";
 import { getPaymentProvider } from "./providers";
 import type { PaymentRecord } from "./types";
 
@@ -140,43 +140,96 @@ paymentsRouter.get("/payments/:id/status", authMiddleware, async (context) => {
 // POST /payments/webhook/qris (no auth — called by payment provider)
 paymentsRouter.post("/payments/webhook/qris", async (context) => {
   const body = await context.req.json();
-  const parsed = webhookSchema.safeParse(body);
 
-  if (!parsed.success) {
-    return context.json(
-      { success: false, error: { code: "VALIDATION_ERROR", message: "Webhook payload tidak valid" } },
-      400,
-    );
+  let paymentId: string;
+  let status: "paid" | "expired" | "failed" | "pending";
+  let reference: string;
+
+  const midtransParsed = midtransWebhookSchema.safeParse(body);
+  if (midtransParsed.success) {
+    const notification = midtransParsed.data;
+    const serverKey = process.env.MIDTRANS_SERVER_KEY;
+    if (!serverKey) {
+      return context.json(
+        { success: false, error: { code: "SERVICE_UNAVAILABLE", message: "Midtrans belum dikonfigurasi" } },
+        503,
+      );
+    }
+
+    const signaturePayload =
+      notification.order_id +
+      notification.status_code +
+      notification.gross_amount +
+      serverKey;
+    const expectedSignature = createHash("sha512").update(signaturePayload).digest("hex");
+    const providedBuffer = Buffer.from(notification.signature_key.toLowerCase());
+    const expectedBuffer = Buffer.from(expectedSignature);
+
+    if (
+      providedBuffer.length !== expectedBuffer.length ||
+      !timingSafeEqual(providedBuffer, expectedBuffer)
+    ) {
+      return context.json(
+        { success: false, error: { code: "FORBIDDEN", message: "Invalid signature" } },
+        403,
+      );
+    }
+
+    paymentId = notification.order_id;
+    reference = notification.transaction_id ?? notification.order_id;
+
+    if (
+      notification.transaction_status === "settlement" ||
+      (notification.transaction_status === "capture" && notification.fraud_status !== "challenge")
+    ) {
+      status = "paid";
+    } else if (notification.transaction_status === "expire") {
+      status = "expired";
+    } else if (["cancel", "deny", "failure"].includes(notification.transaction_status)) {
+      status = "failed";
+    } else {
+      status = "pending";
+    }
+  } else {
+    const parsed = webhookSchema.safeParse(body);
+    if (!parsed.success) {
+      return context.json(
+        { success: false, error: { code: "VALIDATION_ERROR", message: "Webhook payload tidak valid" } },
+        400,
+      );
+    }
+
+    const notification = parsed.data;
+    if (!notification.signature || !env.QRIS_WEBHOOK_SECRET) {
+      return context.json(
+        { success: false, error: { code: "FORBIDDEN", message: "Signature missing" } },
+        403,
+      );
+    }
+
+    const payload = `${notification.payment_id}:${notification.status}:${notification.reference}`;
+    const expectedSignature = createHmac("sha256", env.QRIS_WEBHOOK_SECRET)
+      .update(payload)
+      .digest("hex");
+    const providedBuffer = Buffer.from(notification.signature);
+    const expectedBuffer = Buffer.from(expectedSignature);
+
+    if (
+      providedBuffer.length !== expectedBuffer.length ||
+      !timingSafeEqual(providedBuffer, expectedBuffer)
+    ) {
+      return context.json(
+        { success: false, error: { code: "FORBIDDEN", message: "Invalid signature" } },
+        403,
+      );
+    }
+
+    paymentId = notification.payment_id;
+    status = notification.status;
+    reference = notification.reference;
   }
 
-  // Webhook signature verification
-  const { payment_id, status, reference, signature } = parsed.data;
-
-  if (!signature || !env.QRIS_WEBHOOK_SECRET) {
-    return context.json(
-      { success: false, error: { code: "FORBIDDEN", message: "Signature missing" } },
-      403,
-    );
-  }
-
-  const payload = `${payment_id}:${status}:${reference}`;
-  const expectedSignature = createHmac("sha256", env.QRIS_WEBHOOK_SECRET).update(payload).digest("hex");
-
-  const providedBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expectedSignature);
-
-  if (
-    providedBuffer.length !== expectedBuffer.length ||
-    !timingSafeEqual(providedBuffer, expectedBuffer)
-  ) {
-    return context.json(
-      { success: false, error: { code: "FORBIDDEN", message: "Invalid signature" } },
-      403,
-    );
-  }
-
-  const payment = await paymentRepo.findById(payment_id);
-
+  const payment = await paymentRepo.findById(paymentId);
   if (!payment) {
     return context.json(
       { success: false, error: { code: "NOT_FOUND", message: "Payment tidak ditemukan" } },
@@ -184,12 +237,10 @@ paymentsRouter.post("/payments/webhook/qris", async (context) => {
     );
   }
 
-  // Idempotent: already paid → just return success
   if (payment.status === "paid") {
     return context.json({ success: true, data: formatPayment(payment) });
   }
 
-  // Reject payment on expired QR
   if (payment.expiresAt && payment.expiresAt.getTime() < Date.now()) {
     return context.json(
       { success: false, error: { code: "CONFLICT", message: "QRIS sudah kedaluwarsa. Silakan buat ulang." } },
@@ -198,9 +249,8 @@ paymentsRouter.post("/payments/webhook/qris", async (context) => {
   }
 
   if (status === "paid") {
-    const updated = await paymentRepo.markPaid(payment_id, reference);
+    const updated = await paymentRepo.markPaid(paymentId, reference);
 
-    // Transition order to PAID and credit worker wallet
     const order = await orderRepo.findById(payment.orderId);
     if (order && order.status === "COMPLETED") {
       const nextStatus = transitionOrder(order.status, "PAID");

@@ -1,4 +1,4 @@
-import { createHmac } from "crypto";
+import { createHash } from "crypto";
 import type { PaymentProvider, QrisCreateResult } from "./types";
 
 const SANDBOX_URL = "https://api.sandbox.midtrans.com";
@@ -96,7 +96,7 @@ export class MidtransProvider implements PaymentProvider {
 
   verifyWebhookSignature(payload: string, signature: string): boolean {
     // Midtrans signature: SHA512(order_id + status_code + gross_amount + server_key)
-    const expectedSignature = createHmac("sha512", this.config.serverKey)
+    const expectedSignature = createHash("sha512")
       .update(payload)
       .digest("hex");
     return expectedSignature === signature;
