@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node dist/wasmer/server.js",
     "dev": "bun run --watch src/server.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "test": "bunx vitest run",
