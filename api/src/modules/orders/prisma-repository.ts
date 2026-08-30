@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "../../shared/prisma";
 import type { CreateOrderInput, OrderRecord, OrderRepository, OrderPricingSnapshot } from "./types";
 import type { OrderStatus } from "./state-machine";
-import type { Order, OrderPricing } from "@prisma/client";
+import type { Order, OrderPricing } from "../../generated/prisma";
 
 interface OrderLocationRow {
   lat: number;
