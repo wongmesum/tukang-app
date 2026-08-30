@@ -1,3 +1,4 @@
+# Wasmer autobuild source: master
 # Wasmer GitHub deployments build from the repository root. Keep the API as
 # the isolated application directory so web/admin packages are not detected as
 # the deployment target.
