@@ -1,5 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../generated/prisma";
 import { env } from "../config/env";
 
 // Reuse a single Prisma instance across hot-reloads in development.

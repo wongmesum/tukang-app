@@ -4,22 +4,24 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node dist/wasmer/server.cjs",
     "dev": "bun run --watch src/server.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "test": "bunx vitest run",
     "test:watch": "bunx vitest",
-    "lint": "tsc --noEmit",
+    "lint": "prisma generate && tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "build:node": "esbuild src/server-node.ts --bundle --platform=node --format=esm --outfile=dist/server.js --packages=external --alias:@prisma/client=./src/shared/prisma-client-memory.ts",
     "start:node": "node app.js",
-    "build:wasmer": "prisma generate && esbuild src/server-wasmer.ts --bundle --platform=node --format=esm --outfile=dist/wasmer/server.js --packages=external",
-    "start:wasmer": "node dist/wasmer/server.js"
+    "build:wasmer": "prisma generate && esbuild src/server-wasmer.ts --bundle --platform=node --format=cjs --outfile=dist/wasmer/server.cjs --packages=external",
+    "start:wasmer": "node dist/wasmer/server.cjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
     "@prisma/adapter-pg": "6.19.3",
+    "@prisma/client": "6.19.3",
     "hono": "^4.6.0",
     "ioredis": "^5.4.0",
     "jsonwebtoken": "^9.0.2",
@@ -27,7 +29,6 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@prisma/client": "6.19.3",
     "@types/bun": "^1.1.0",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/pg": "^8.23.1",

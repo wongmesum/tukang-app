@@ -62,7 +62,7 @@ jobs:
           BACKGROUND_JOBS_ENABLED: "false"
           PORT: "8787"
         run: |
-          node dist/wasmer/server.js > /tmp/tukangndeso-wasmer.log 2>&1 &
+          node dist/wasmer/server.cjs > /tmp/tukangndeso-wasmer.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for attempt in 1 2 3 4 5; do
